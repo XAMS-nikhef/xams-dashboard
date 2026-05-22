@@ -68,6 +68,14 @@ def v2_admin():
     return render_template('v2/admin.html')
 
 
+@app.get('/corrections')
+@app.get('/v2/corrections')
+def v2_corrections():
+    if request.path == '/v2/corrections':
+        return redirect('/corrections')
+    return render_template('v2/corrections.html')
+
+
 @app.get('/api/runs')
 @app.get('/api/v2/runs')
 def v2_runs():
@@ -133,8 +141,30 @@ def v2_meta():
             'science_runs': mongo.list_science_runs(),
             'run_modes': modes,
             'run_classes': ["science", "calibration", "led", "test"],
+            'corrections_versions': processing.list_corrections_versions(),
+            'amstrax_default_path': processing.default_amstrax_root,
         }
     )
+
+
+@app.get('/api/corrections/meta')
+@app.get('/api/v2/corrections/meta')
+def v2_corrections_meta():
+    amstrax_path = (request.args.get('amstrax_path') or '').strip() or None
+    return jsonify({
+        "amstrax": processing.get_amstrax_info(amstrax_path=amstrax_path),
+        "corrections_versions": processing.list_corrections_versions(),
+    })
+
+
+@app.get('/api/corrections/summary')
+@app.get('/api/v2/corrections/summary')
+def v2_corrections_summary():
+    run_id = int(request.args.get('run_id', '0') or '0')
+    corrections_version = (request.args.get('corrections_version') or 'ONLINE').strip()
+    if run_id <= 0:
+        return jsonify({"error": "invalid_run_id"}), 400
+    return jsonify(processing.summarize_corrections_for_run(run_id=run_id, corrections_version=corrections_version))
 
 
 @app.get('/api/run/<int:run_id>')

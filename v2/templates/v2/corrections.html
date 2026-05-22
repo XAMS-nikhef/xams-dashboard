@@ -1,0 +1,43 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>XAMS Dashboard Corrections</title>
+  <link rel="stylesheet" href="/static/v2/styles.css" />
+</head>
+<body>
+  <div class="bg"></div>
+  <div class="app">
+    <header class="topbar">
+      <h1>XAMS Dashboard</h1>
+      <div class="nav-links">
+        <a class="nav-link" href="/">Runs</a>
+        <a class="nav-link active" href="/corrections">Corrections</a>
+        <a class="nav-link" href="/admin">Admin</a>
+      </div>
+    </header>
+
+    <main class="grid admin-grid">
+      <section class="panel">
+        <div class="panel-title">Corrections Inspector</div>
+        <div class="batch-actions">
+          <input id="amstraxPath" placeholder="amstrax path" />
+          <button id="refreshAmstrax">Refresh amstrax info</button>
+        </div>
+        <pre id="amstraxInfo">Loading amstrax info...</pre>
+
+        <div class="panel-title small-top">Run-Specific Summary</div>
+        <div class="batch-actions">
+          <select id="corrVersionSel"></select>
+          <input id="corrRunId" type="number" placeholder="Run ID" />
+          <button id="refreshSummary">Load summary</button>
+        </div>
+        <div class="hint">Run id defaults to latest available run.</div>
+        <pre id="corrSummary">No summary loaded yet.</pre>
+      </section>
+    </main>
+  </div>
+  <script src="/static/v2/corrections.js"></script>
+</body>
+</html>

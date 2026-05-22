@@ -2,10 +2,10 @@ from __future__ import annotations
 
 import os
 import subprocess
+import re
 from datetime import datetime
 import time
 import glob
-import re
 from typing import Dict, List, Optional, Union, Tuple
 
 from .config import settings
@@ -23,6 +23,108 @@ class ProcessingService:
             "16gb": {"mem": 16000, "queue": "short"},
             "32gb": {"mem": 32000, "queue": "short"},
         }
+        self.default_amstrax_root = os.path.abspath(os.path.join(self.amstrax_dir, "..", ".."))
+
+    def _run_cmd(self, cmd: list[str]) -> str:
+        try:
+            p = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, check=False)
+            if p.returncode == 0:
+                return (p.stdout or "").strip()
+        except Exception:
+            pass
+        return ""
+
+    def get_amstrax_info(self, amstrax_path: Optional[str] = None) -> dict:
+        root = os.path.abspath((amstrax_path or self.default_amstrax_root).strip())
+        info = {"path": root, "exists": os.path.isdir(root), "version": "", "branch": "", "commit": ""}
+        if not info["exists"]:
+            return info
+        info["branch"] = self._run_cmd(["git", "-C", root, "rev-parse", "--abbrev-ref", "HEAD"])
+        info["commit"] = self._run_cmd(["git", "-C", root, "rev-parse", "--short", "HEAD"])
+        init_py = os.path.join(root, "amstrax", "__init__.py")
+        if os.path.exists(init_py):
+            try:
+                txt = open(init_py, "r", encoding="utf-8").read()
+                m = re.search(r"__version__\s*=\s*['\\\"]([^'\\\"]+)['\\\"]", txt)
+                if m:
+                    info["version"] = m.group(1)
+            except Exception:
+                pass
+        return info
+
+    def list_corrections_versions(self) -> list[str]:
+        versions: list[str] = []
+        try:
+            import amstrax_files  # type: ignore
+            root = os.path.join(os.path.dirname(amstrax_files.__file__), "..", "corrections", "_global")
+            root = os.path.abspath(root)
+            if os.path.isdir(root):
+                for fn in os.listdir(root):
+                    m = re.match(r"^_global_(.+)\.json$", fn)
+                    if m:
+                        versions.append(m.group(1))
+        except Exception:
+            pass
+        if not versions:
+            versions = ["ONLINE", "v2", "v1"]
+        def _key(v: str):
+            if v == "ONLINE":
+                return (0, 0, v)
+            mv = re.match(r"^v(\d+)$", v)
+            if mv:
+                return (1, -int(mv.group(1)), v)
+            return (2, 0, v)
+        return sorted(set(versions), key=_key)
+
+    def summarize_corrections_for_run(self, run_id: int, corrections_version: str) -> dict:
+        run_id_i = int(run_id)
+        run_s = f"{run_id_i:06d}"
+        out = {"run_id": run_id_i, "corrections_version": corrections_version, "ok": False, "entries": [], "error": ""}
+        try:
+            import amstrax  # type: ignore
+            global_cfg = amstrax.get_correction(f"_global_{corrections_version}.json")
+            if not isinstance(global_cfg, dict):
+                out["error"] = "Global correction config is not a dict"
+                return out
+            entries = []
+            for key, correction_file in global_cfg.items():
+                ent = {"key": str(key), "file": str(correction_file), "matched_rule": "", "value_preview": "", "ok": False}
+                try:
+                    corr = amstrax.get_correction(str(correction_file))
+                    if not isinstance(corr, dict):
+                        ent["value_preview"] = f"type={type(corr).__name__}"
+                        entries.append(ent)
+                        continue
+                    allow_wildcard = "_dev" in str(correction_file)
+                    matched_rule = None
+                    matched_val = None
+                    for rule, val in corr.items():
+                        if self._run_in_range(str(rule), run_id_i, allow_wildcard=allow_wildcard):
+                            matched_rule = str(rule)
+                            matched_val = val
+                            break
+                    if matched_rule is None:
+                        ent["value_preview"] = "NO_MATCH"
+                    else:
+                        ent["matched_rule"] = matched_rule
+                        ent["ok"] = True
+                        if isinstance(matched_val, (int, float, str, bool)) or matched_val is None:
+                            ent["value_preview"] = str(matched_val)
+                        elif isinstance(matched_val, dict):
+                            ent["value_preview"] = "{" + ", ".join(list(matched_val.keys())[:6]) + ("..." if len(matched_val) > 6 else "") + "}"
+                        elif isinstance(matched_val, list):
+                            ent["value_preview"] = f"list(len={len(matched_val)})"
+                        else:
+                            ent["value_preview"] = f"type={type(matched_val).__name__}"
+                except Exception as e:
+                    ent["value_preview"] = f"ERROR: {e}"
+                entries.append(ent)
+            out["entries"] = entries
+            out["ok"] = all(e.get("ok") for e in entries) if entries else False
+            return out
+        except Exception as e:
+            out["error"] = str(e)
+            return out
 
     @staticmethod
     def _tail_text(path: str, max_bytes: int = 12000) -> str:
