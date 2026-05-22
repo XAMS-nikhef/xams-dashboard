@@ -100,7 +100,6 @@ class ProcessingService:
 
     def summarize_corrections_for_run(self, run_id: int, corrections_version: str) -> dict:
         run_id_i = int(run_id)
-        run_s = f"{run_id_i:06d}"
         out = {"run_id": run_id_i, "corrections_version": corrections_version, "ok": False, "entries": [], "error": ""}
         try:
             import amstrax  # type: ignore
@@ -109,21 +108,52 @@ class ProcessingService:
                 out["error"] = "Global correction config is not a dict"
                 return out
             entries = []
-            for key, correction_file in global_cfg.items():
-                ent = {"key": str(key), "file": str(correction_file), "matched_rule": "", "value_preview": "", "ok": False}
+            for key, spec in global_cfg.items():
+                ent = {"key": str(key), "file": "", "matched_rule": "-", "value_preview": "", "ok": False}
                 try:
-                    corr = amstrax.get_correction(str(correction_file))
+                    # Scalar/list values in _global are direct values, not files.
+                    if isinstance(spec, (int, float, bool)) or spec is None:
+                        ent["file"] = "-"
+                        ent["value_preview"] = str(spec)
+                        ent["ok"] = True
+                        entries.append(ent)
+                        continue
+                    if isinstance(spec, list):
+                        ent["file"] = "-"
+                        ent["value_preview"] = f"list(len={len(spec)})"
+                        ent["ok"] = True
+                        entries.append(ent)
+                        continue
+
+                    corr = None
+                    if isinstance(spec, str) and spec.endswith(".json"):
+                        ent["file"] = str(spec)
+                        corr = amstrax.get_correction(str(spec))
+                    elif isinstance(spec, dict):
+                        ent["file"] = "<inline>"
+                        corr = spec
+                    elif isinstance(spec, str):
+                        ent["file"] = "-"
+                        ent["value_preview"] = spec
+                        ent["ok"] = True
+                        entries.append(ent)
+                        continue
+                    else:
+                        ent["file"] = "-"
+                        ent["value_preview"] = f"type={type(spec).__name__}"
+                        entries.append(ent)
+                        continue
+
                     if not isinstance(corr, dict):
                         ent["value_preview"] = f"type={type(corr).__name__}"
                         entries.append(ent)
                         continue
-                    allow_wildcard = "_dev" in str(correction_file)
-                    matched_rule = None
-                    matched_val = None
+
+                    allow_wildcard = isinstance(spec, str) and "_dev" in str(spec)
+                    matched_rule, matched_val = None, None
                     for rule, val in corr.items():
                         if self._run_in_range(str(rule), run_id_i, allow_wildcard=allow_wildcard):
-                            matched_rule = str(rule)
-                            matched_val = val
+                            matched_rule, matched_val = str(rule), val
                             break
                     if matched_rule is None:
                         ent["value_preview"] = "NO_MATCH"
@@ -132,13 +162,15 @@ class ProcessingService:
                         ent["ok"] = True
                         if isinstance(matched_val, (int, float, str, bool)) or matched_val is None:
                             ent["value_preview"] = str(matched_val)
-                        elif isinstance(matched_val, dict):
-                            ent["value_preview"] = "{" + ", ".join(list(matched_val.keys())[:6]) + ("..." if len(matched_val) > 6 else "") + "}"
                         elif isinstance(matched_val, list):
                             ent["value_preview"] = f"list(len={len(matched_val)})"
+                        elif isinstance(matched_val, dict):
+                            ent["value_preview"] = "{" + ", ".join(list(matched_val.keys())[:6]) + ("..." if len(matched_val) > 6 else "") + "}"
                         else:
                             ent["value_preview"] = f"type={type(matched_val).__name__}"
                 except Exception as e:
+                    if not ent["file"]:
+                        ent["file"] = str(spec)
                     ent["value_preview"] = f"ERROR: {e}"
                 entries.append(ent)
             out["entries"] = entries

@@ -25,7 +25,12 @@
           <input id="amstraxPath" placeholder="amstrax path" />
           <button id="refreshAmstrax">Refresh amstrax info</button>
         </div>
-        <pre id="amstraxInfo">Loading amstrax info...</pre>
+        <div class="table-wrap">
+          <table id="amstraxInfoTable">
+            <thead><tr><th>Field</th><th>Value</th></tr></thead>
+            <tbody></tbody>
+          </table>
+        </div>
 
         <div class="panel-title small-top">Run-Specific Summary</div>
         <div class="batch-actions">
@@ -34,7 +39,21 @@
           <button id="refreshSummary">Load summary</button>
         </div>
         <div class="hint">Run id defaults to latest available run.</div>
-        <pre id="corrSummary">No summary loaded yet.</pre>
+        <div id="corrSummaryMeta" class="hint">No summary loaded yet.</div>
+        <div class="table-wrap">
+          <table id="corrSummaryTable">
+            <thead>
+              <tr>
+                <th>Status</th>
+                <th>Key</th>
+                <th>Source</th>
+                <th>Rule</th>
+                <th>Value</th>
+              </tr>
+            </thead>
+            <tbody></tbody>
+          </table>
+        </div>
       </section>
     </main>
   </div>

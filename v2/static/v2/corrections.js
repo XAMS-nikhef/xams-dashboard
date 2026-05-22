@@ -1,11 +1,45 @@
 const $ = (id) => document.getElementById(id);
 
-function fmtEntries(entries){
-  if(!entries || !entries.length) return 'No correction entries.';
-  return entries.map(e=>{
-    const ok=e.ok?'OK ':'NO ';
-    return `${ok} ${e.key}\n  file: ${e.file}\n  rule: ${e.matched_rule||'-'}\n  value: ${e.value_preview||'-'}`;
-  }).join('\n\n');
+function esc(s){return String(s??'').replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;","'":"&#39;"}[c]))}
+
+function renderAmstraxInfo(a){
+  const tb = $('amstraxInfoTable').querySelector('tbody');
+  tb.innerHTML = '';
+  const rows = [
+    ['Path', a.path || '-'],
+    ['Exists', a.exists ? 'yes' : 'no'],
+    ['Version', a.version || '-'],
+    ['Branch', a.branch || '-'],
+    ['Commit', a.commit || '-'],
+  ];
+  for(const [k,v] of rows){
+    const tr=document.createElement('tr');
+    tr.innerHTML=`<td>${esc(k)}</td><td><code>${esc(v)}</code></td>`;
+    tb.appendChild(tr);
+  }
+}
+
+function renderSummaryTable(entries){
+  const tb = $('corrSummaryTable').querySelector('tbody');
+  tb.innerHTML = '';
+  if(!entries || !entries.length){
+    const tr=document.createElement('tr');
+    tr.innerHTML='<td colspan="5" class="hint">No correction entries.</td>';
+    tb.appendChild(tr);
+    return;
+  }
+  for(const e of entries){
+    const tr=document.createElement('tr');
+    const badge = e.ok ? '<span class="badge-good">OK</span>' : '<span class="badge-bad">NO</span>';
+    tr.innerHTML = `
+      <td>${badge}</td>
+      <td><code>${esc(e.key)}</code></td>
+      <td><code>${esc(e.file || '-')}</code></td>
+      <td><code>${esc(e.matched_rule || '-')}</code></td>
+      <td><code>${esc(e.value_preview || '-')}</code></td>
+    `;
+    tb.appendChild(tr);
+  }
 }
 
 async function loadAmstraxInfo(){
@@ -14,13 +48,7 @@ async function loadAmstraxInfo(){
   const r=await fetch(`/api/corrections/meta${q}`);
   const j=await r.json();
   const a=j.amstrax||{};
-  $('amstraxInfo').textContent=[
-    `Path: ${a.path||'-'}`,
-    `Exists: ${a.exists?'yes':'no'}`,
-    `Version: ${a.version||'-'}`,
-    `Branch: ${a.branch||'-'}`,
-    `Commit: ${a.commit||'-'}`
-  ].join('\n');
+  renderAmstraxInfo(a);
   const sel=$('corrVersionSel');
   const current=sel.value;
   sel.innerHTML='';
@@ -40,17 +68,13 @@ async function loadLatestRunDefault(){
 async function loadSummary(){
   const runId=($('corrRunId').value||'').trim();
   const ver=($('corrVersionSel').value||'ONLINE').trim();
-  if(!runId){$('corrSummary').textContent='Set run id first.';return;}
-  $('corrSummary').textContent='Loading...';
+  if(!runId){$('corrSummaryMeta').textContent='Set run id first.';return;}
+  $('corrSummaryMeta').textContent='Loading...';
   const r=await fetch(`/api/corrections/summary?run_id=${encodeURIComponent(runId)}&corrections_version=${encodeURIComponent(ver)}`);
   const j=await r.json();
-  if(j.error){$('corrSummary').textContent=`Error: ${j.error}`;return;}
-  const head=[
-    `Run: ${j.run_id}`,
-    `Corrections version: ${j.corrections_version}`,
-    `Overall compatible: ${j.ok?'yes':'no'}`
-  ].join('\n');
-  $('corrSummary').textContent=`${head}\n\n${fmtEntries(j.entries||[])}`;
+  if(j.error){$('corrSummaryMeta').textContent=`Error: ${j.error}`; renderSummaryTable([]); return;}
+  $('corrSummaryMeta').textContent = `Run ${j.run_id} | Version ${j.corrections_version} | Overall compatible: ${j.ok?'yes':'no'}`;
+  renderSummaryTable(j.entries||[]);
 }
 
 async function init(){

@@ -73,6 +73,24 @@ tr:hover{background:#162744}
 
 .pager,.batch-actions{display:flex;align-items:center;gap:8px;margin-top:8px;flex-wrap:wrap}
 .hint{margin-top:8px;color:var(--muted);font-size:12px}
+.badge-good{
+  display:inline-block;
+  padding:2px 8px;
+  border-radius:999px;
+  font-weight:700;
+  font-size:11px;
+  color:#052b14;
+  background:#79e8a3;
+}
+.badge-bad{
+  display:inline-block;
+  padding:2px 8px;
+  border-radius:999px;
+  font-weight:700;
+  font-size:11px;
+  color:#3f0909;
+  background:#ff9f9f;
+}
 .selection-summary{
   margin-top:6px;
   margin-bottom:8px;
