@@ -3,6 +3,8 @@ from __future__ import annotations
 import os
 import subprocess
 import re
+import json
+import urllib.request
 from datetime import datetime
 import time
 import glob
@@ -54,19 +56,39 @@ class ProcessingService:
 
     def list_corrections_versions(self) -> list[str]:
         versions: list[str] = []
+        # Source of truth: GitHub repository content listing.
+        gh_url = (
+            "https://api.github.com/repos/XAMS-nikhef/amstrax_files/contents/"
+            "amstrax_files/corrections/_global"
+        )
         try:
-            import amstrax_files  # type: ignore
-            root = os.path.join(os.path.dirname(amstrax_files.__file__), "..", "corrections", "_global")
-            root = os.path.abspath(root)
-            if os.path.isdir(root):
-                for fn in os.listdir(root):
+            with urllib.request.urlopen(gh_url, timeout=10) as resp:
+                payload = json.loads(resp.read().decode("utf-8"))
+            if isinstance(payload, list):
+                for item in payload:
+                    if not isinstance(item, dict):
+                        continue
+                    fn = str(item.get("name", ""))
                     m = re.match(r"^_global_(.+)\.json$", fn)
                     if m:
                         versions.append(m.group(1))
         except Exception:
             pass
+        # Fallback path: ask amstrax by probing common versions.
         if not versions:
-            versions = ["ONLINE", "v2", "v1"]
+            probe = ["ONLINE", "v4", "v3", "v2", "v1", "v0", "dev"]
+            try:
+                import amstrax  # type: ignore
+                for v in probe:
+                    try:
+                        _ = amstrax.get_correction(f"_global_{v}.json")
+                        versions.append(v)
+                    except Exception:
+                        continue
+            except Exception:
+                pass
+        if not versions:
+            versions = ["ONLINE", "v2", "v1", "v0", "dev"]
         def _key(v: str):
             if v == "ONLINE":
                 return (0, 0, v)
