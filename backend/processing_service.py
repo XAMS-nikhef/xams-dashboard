@@ -163,7 +163,13 @@ class ProcessingService:
                         if isinstance(matched_val, (int, float, str, bool)) or matched_val is None:
                             ent["value_preview"] = str(matched_val)
                         elif isinstance(matched_val, list):
-                            ent["value_preview"] = f"list(len={len(matched_val)})"
+                            if len(matched_val) <= 64:
+                                try:
+                                    ent["value_preview"] = json.dumps(matched_val)
+                                except Exception:
+                                    ent["value_preview"] = str(matched_val)
+                            else:
+                                ent["value_preview"] = f"list(len={len(matched_val)})"
                         elif isinstance(matched_val, dict):
                             ent["value_preview"] = "{" + ", ".join(list(matched_val.keys())[:6]) + ("..." if len(matched_val) > 6 else "") + "}"
                         else:
