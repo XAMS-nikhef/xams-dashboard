@@ -375,8 +375,8 @@ function init(){
   $('nextPage').onclick=()=>{state.page=Math.min(state.nPages,state.page+1);fetchRuns()};
   $('submitSelected').onclick=submitSelected;
   $('submitFocused').onclick=submitFocused;
-  $('deleteFocused').onclick=deleteFocused;
-  $('deleteSelected').onclick=deleteSelected;
+  if($('deleteFocused')) $('deleteFocused').onclick=deleteFocused;
+  if($('deleteSelected')) $('deleteSelected').onclick=deleteSelected;
   $('selectPage').onclick=selectPageRuns;
   $('clearSelection').onclick=clearSelection;
   $('showSelected').onclick=showSelected;
