@@ -5,6 +5,7 @@ import os
 from datetime import datetime
 from flask import Flask, jsonify, render_template, request, redirect
 
+from backend.deletion_service import delete_run_disk_data
 from backend.events_loader import load_event_features
 from backend.loadability import scan_disk_availability
 from backend.mongo_service import MongoService
@@ -348,6 +349,16 @@ def v2_submit():
     skipped = sum(1 for x in out if x.get('status') == 'skipped')
     failed = len(out) - ok - skipped
     return jsonify({'submitted': ok, 'skipped': skipped, 'failed': failed, 'total': len(out), 'results': out})
+
+
+@app.post('/api/run/<int:run_id>/delete_data')
+@app.post('/api/v2/run/<int:run_id>/delete_data')
+def v2_delete_run_data(run_id: int):
+    disk = delete_run_disk_data(run_id)
+    db = mongo.delete_run_data_entries(run_id)
+    return jsonify({'disk': disk, 'db': db,
+                    'n_deleted': len(disk['deleted']),
+                    'n_errors': len(disk['errors'])})
 
 
 if __name__ == '__main__':

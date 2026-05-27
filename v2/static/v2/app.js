@@ -178,6 +178,39 @@ function applyLogIfNeeded(z, useLog){
   return z.map(row=>row.map(v=>Math.log10((Number(v)||0)+1)));
 }
 
+async function deleteRunIds(run_ids, label){
+  if(!run_ids.length){$('submitResult').textContent='No run selected';return;}
+  const word=run_ids.length===1?'run':'runs';
+  if(!confirm(`Delete ALL data for ${run_ids.length} ${word} (${label})?\n\nThis wipes every data directory from disk and clears the data entries in the DB.\n\nThis cannot be undone.`)) return;
+  $('submitResult').textContent=`Deleting data for ${run_ids.length} ${word}...`;
+  if($('submitDetails')) $('submitDetails').textContent='';
+  const lines=[];
+  for(const runId of run_ids){
+    try{
+      const r=await fetch(`/api/run/${runId}/delete_data`,{method:'POST'});
+      const j=await r.json();
+      lines.push(`run ${runId}: deleted ${j.n_deleted} dir(s)${j.n_errors?' | '+j.n_errors+' error(s)':''} | DB ${j.db.modified?'updated':'unchanged'}`);
+    }catch(e){
+      lines.push(`run ${runId}: request failed - ${e}`);
+    }
+  }
+  $('submitResult').textContent=`Done deleting ${run_ids.length} ${word}`;
+  if($('submitDetails')) $('submitDetails').textContent=lines.join('\n');
+  fetchRuns();
+}
+
+async function deleteFocused(){
+  const runId=state.selectedRun;
+  if(!runId){$('submitResult').textContent='No focused run';return;}
+  await deleteRunIds([runId],'focused');
+}
+
+async function deleteSelected(){
+  const run_ids=[...state.selectedRuns];
+  if(!run_ids.length){$('submitResult').textContent='Select runs first';return;}
+  await deleteRunIds(run_ids,'selected');
+}
+
 async function submitSelected(){
   const run_ids=[...state.selectedRuns]; if(!run_ids.length){$('submitResult').textContent='Select runs first';return;}
   await submitRunIds(run_ids, 'selected');
@@ -342,6 +375,8 @@ function init(){
   $('nextPage').onclick=()=>{state.page=Math.min(state.nPages,state.page+1);fetchRuns()};
   $('submitSelected').onclick=submitSelected;
   $('submitFocused').onclick=submitFocused;
+  $('deleteFocused').onclick=deleteFocused;
+  $('deleteSelected').onclick=deleteSelected;
   $('selectPage').onclick=selectPageRuns;
   $('clearSelection').onclick=clearSelection;
   $('showSelected').onclick=showSelected;

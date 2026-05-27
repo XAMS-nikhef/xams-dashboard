@@ -232,6 +232,19 @@ class MongoService:
             )
         return out, int(total)
 
+    def delete_run_data_entries(self, run_id: int) -> dict[str, Any]:
+        """Remove all data entries from the run document and reset processing_status."""
+        result = self.runs.update_one(
+            {"number": int(run_id)},
+            {
+                "$set": {
+                    "data": [],
+                    "processing_status": {"status": "deleted", "time": datetime.utcnow()},
+                }
+            },
+        )
+        return {"matched": result.matched_count, "modified": result.modified_count}
+
     def get_run_doc(self, run_id: int) -> dict[str, Any] :
         return self.runs.find_one({"number": int(run_id)}, {"_id": 0})
 

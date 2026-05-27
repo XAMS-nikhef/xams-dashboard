@@ -9,6 +9,7 @@ from dash import Dash, Input, Output, State, dash_table, dcc, html
 from dash.exceptions import PreventUpdate
 
 from backend.api import create_api_blueprint
+from backend.deletion_service import delete_run_disk_data
 from backend.events_loader import load_event_features
 from backend.loadability import scan_disk_availability
 from backend.mongo_service import MongoService
@@ -39,14 +40,26 @@ app.layout = html.Div(
         dcc.Store(id="url-init-done", data={"done": False}),
         dcc.Store(id="selected-run-store", data={"run_id": None}),
         dcc.Interval(id="refresh-interval", interval=20_000, n_intervals=0),
+        dcc.ConfirmDialog(
+            id="confirm-delete-dialog",
+            message="",
+        ),
         html.H2("XAMS Dashboard"),
         html.Div(
             [
                 dcc.Input(id="run-id-input", type="number", placeholder="Run ID", min=0),
                 html.Button("Load Run", id="load-run-btn", n_clicks=0),
                 html.Button("Process to event_info", id="process-btn", n_clicks=0),
+                html.Button(
+                    "Delete All Data",
+                    id="delete-data-btn",
+                    n_clicks=0,
+                    style={"backgroundColor": "#c0392b", "color": "white", "border": "none",
+                           "padding": "6px 14px", "cursor": "pointer", "borderRadius": "4px"},
+                ),
                 html.Button("Refresh Now", id="refresh-now-btn", n_clicks=0),
                 html.Span(id="action-status", style={"marginLeft": "12px", "fontWeight": "600"}),
+                html.Span(id="delete-status", style={"marginLeft": "12px", "fontWeight": "600", "color": "#c0392b"}),
             ],
             style={"display": "flex", "gap": "8px", "alignItems": "center", "flexWrap": "wrap"},
         ),
@@ -286,6 +299,54 @@ def submit_processing(_clicks, selected):
     if out["returncode"] == 409:
         return "Duplicate click blocked for run {}".format(run_id)
     return "Submission failed (code={})".format(out["returncode"])
+
+
+@app.callback(
+    Output("confirm-delete-dialog", "displayed"),
+    Output("confirm-delete-dialog", "message"),
+    Input("delete-data-btn", "n_clicks"),
+    State("selected-run-store", "data"),
+    prevent_initial_call=True,
+)
+def show_delete_confirm(_clicks, selected):
+    run_id = (selected or {}).get("run_id")
+    if run_id is None:
+        raise PreventUpdate
+    availability = scan_disk_availability(int(run_id))
+    n_dirs = len(availability)
+    total_mb = sum(r.get("size_mb", 0) for r in availability)
+    msg = (
+        "Delete ALL data for run {}?\n\n"
+        "This will remove {} director{} ({:.1f} MB) from disk "
+        "and clear all data entries + processing_status in the DB.\n\n"
+        "This cannot be undone."
+    ).format(run_id, n_dirs, "y" if n_dirs == 1 else "ies", total_mb)
+    return True, msg
+
+
+@app.callback(
+    Output("delete-status", "children"),
+    Input("confirm-delete-dialog", "submit_n_clicks"),
+    State("selected-run-store", "data"),
+    prevent_initial_call=True,
+)
+def execute_delete(_submit_clicks, selected):
+    run_id = (selected or {}).get("run_id")
+    if run_id is None:
+        raise PreventUpdate
+
+    disk = delete_run_disk_data(int(run_id))
+    db = mongo.delete_run_data_entries(int(run_id))
+
+    n_ok = len(disk["deleted"])
+    n_err = len(disk["errors"])
+    db_ok = db.get("modified", 0) > 0
+
+    parts = ["Run {}: deleted {} dir{}".format(run_id, n_ok, "s" if n_ok != 1 else "")]
+    if n_err:
+        parts.append("{} error{}".format(n_err, "s" if n_err != 1 else ""))
+    parts.append("DB {}".format("updated" if db_ok else "unchanged"))
+    return " | ".join(parts)
 
 
 if __name__ == "__main__":

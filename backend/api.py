@@ -52,4 +52,14 @@ def create_api_blueprint(mongo: MongoService, processing: ProcessingService) -> 
     def job_status(run_id: int):
         return jsonify(mongo.get_job_status(run_id))
 
+    @bp.post("/runs/<int:run_id>/delete_data")
+    def delete_run_data(run_id: int):
+        from .deletion_service import delete_run_disk_data
+
+        disk = delete_run_disk_data(run_id)
+        db = mongo.delete_run_data_entries(run_id)
+        n_deleted = len(disk["deleted"])
+        n_errors = len(disk["errors"])
+        return jsonify({"disk": disk, "db": db, "n_deleted": n_deleted, "n_errors": n_errors})
+
     return bp

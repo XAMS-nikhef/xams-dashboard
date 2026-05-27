@@ -164,6 +164,9 @@ tr:hover{background:#162744}
 .bad{color:var(--bad)}
 .warn{color:var(--warn)}
 
+.btn-danger{background:#7b1e1e;color:#ffd0d0;border:1px solid #c0392b}
+.btn-danger:hover{background:#c0392b;color:#fff}
+
 pre{margin:0}
 
 @media(max-width:1500px){
