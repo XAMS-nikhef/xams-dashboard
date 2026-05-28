@@ -277,6 +277,16 @@ def v2_submit():
         required_targets = ['led_calibration'] if is_led else [str(t) for t in requested_targets]
         availability = scan_disk_availability(run_id)
         by_type = {str(row.get('type')): bool(row.get('loadable')) for row in availability}
+        # For science runs: if raw_records are missing from both DB and disk,
+        # prepend raw_records so process.py knows to build them from live data first.
+        if not is_led:
+            db_dtypes = {e.data_type for e in (run_details.data_entries if run_details else [])}
+            raw_on_disk = any(
+                row.get('type') == 'raw_records' and row.get('n_files', 0) > 0
+                for row in availability
+            )
+            if 'raw_records' not in db_dtypes and not raw_on_disk:
+                targets = ['raw_records'] + targets
         # Skip only when targets are already loadable for the same requested context.
         # If amstrax_ref is explicitly requested, always allow re-submit (version/path changes are meaningful).
         force_submit = bool(amstrax_ref)
