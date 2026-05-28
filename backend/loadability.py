@@ -184,6 +184,18 @@ def scan_disk_availability(run_id: int) -> List[Dict[str, Any]]:
     return rows
 
 
+def check_is_stored(run_id: int, data_type: str) -> bool:
+    """Ask the current amstrax context directly whether a data type is stored for a run."""
+    try:
+        import amstrax  # type: ignore
+
+        run6 = "{:06d}".format(int(run_id))
+        st = amstrax.contexts.xams(output_folder=settings.stbc_output_dir)
+        return bool(st.is_stored(run6, data_type))
+    except Exception:
+        return False
+
+
 def _reason(n_files: int, dtype: str, disk_lineage: str, current_lineage: str, is_stored: bool) -> str:
     if n_files == 0:
         return "directory exists but empty"

@@ -7,7 +7,7 @@ from flask import Flask, jsonify, render_template, request, redirect
 
 from backend.deletion_service import delete_run_disk_data
 from backend.events_loader import load_event_features
-from backend.loadability import scan_disk_availability
+from backend.loadability import check_is_stored, scan_disk_availability
 from backend.mongo_service import MongoService
 from backend.processing_service import ProcessingService
 
@@ -277,15 +277,10 @@ def v2_submit():
         required_targets = ['led_calibration'] if is_led else [str(t) for t in requested_targets]
         availability = scan_disk_availability(run_id)
         by_type = {str(row.get('type')): bool(row.get('loadable')) for row in availability}
-        # For science runs: if raw_records are not loadable in the current context,
+        # For science runs: if raw_records are not stored in the current context,
         # prepend raw_records so process.py knows to build them from live data first.
-        if not is_led:
-            raw_loadable = any(
-                row.get('type') == 'raw_records' and row.get('loadable')
-                for row in availability
-            )
-            if not raw_loadable:
-                targets = ['raw_records'] + targets
+        if not is_led and not check_is_stored(run_id, 'raw_records'):
+            targets = ['raw_records'] + targets
         # Skip only when targets are already loadable for the same requested context.
         # If amstrax_ref is explicitly requested, always allow re-submit (version/path changes are meaningful).
         force_submit = bool(amstrax_ref)
