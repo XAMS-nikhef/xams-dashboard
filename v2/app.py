@@ -110,6 +110,7 @@ def v2_runs():
         'status': r.processing_status or 'unknown',
         'has_raw_records': bool(r.has_raw_records),
         'has_event_info': bool(r.has_events),
+        'has_led_calibration': bool(r.has_led_calibration),
         'science_run_id': r.science_run_id or '',
         'run_class': r.run_class or '',
         'source_type': r.source_type or '',

@@ -33,7 +33,7 @@ function renderRuns(){
   const tb=$('runsTable').querySelector('tbody'); tb.innerHTML='';
   for(const row of state.rows){
     const tr=document.createElement('tr'); if(state.selectedRun===row.run_id)tr.classList.add('selected');
-    tr.innerHTML=`<td><input type="checkbox" ${state.selectedRuns.has(row.run_id)?'checked':''}></td><td>${row.run_id}</td><td>${esc(row.science_run_id||'-')}</td><td>${esc(row.run_class||'-')}</td><td>${esc(row.source_type||'-')}</td><td>${esc(row.mode)}</td><td class="${row.has_raw_records?'good':'bad'}">${row.has_raw_records?'yes':'no'}</td><td class="${row.has_event_info?'good':'warn'}">${row.has_event_info?'yes':'no'}</td><td>${esc(row.status)}</td><td>${fmt(row.start)}</td>`;
+    tr.innerHTML=`<td><input type="checkbox" ${state.selectedRuns.has(row.run_id)?'checked':''}></td><td>${row.run_id}</td><td>${esc(row.science_run_id||'-')}</td><td>${esc(row.run_class||'-')}</td><td>${esc(row.source_type||'-')}</td><td>${esc(row.mode)}</td><td class="${row.has_raw_records?'good':'bad'}">${row.has_raw_records?'yes':'no'}</td><td class="${row.has_event_info?'good':'warn'}">${row.has_event_info?'yes':'no'}</td><td class="${row.has_led_calibration?'good':'warn'}">${row.has_led_calibration?'yes':'no'}</td><td>${esc(row.status)}</td><td>${fmt(row.start)}</td>`;
     tr.querySelector('input').addEventListener('click',e=>{e.stopPropagation(); if(e.target.checked)state.selectedRuns.add(row.run_id); else state.selectedRuns.delete(row.run_id)});
     tr.addEventListener('click',()=>{state.selectedRun=row.run_id; history.replaceState(null,'',`?run_id=${row.run_id}`); renderRuns(); loadRun(row.run_id)});
     tb.appendChild(tr);
