@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import re
 import time
 from typing import Any, Dict, List
 
@@ -122,6 +123,55 @@ def _expected(run6: str, dtype: str, corrections_version=None):
     except Exception:
         stored = False
     return lineage, stored
+
+
+_LINEAGE_CACHE: Dict[Any, Any] = {}
+
+
+def _current_lineage(run6: str, dtype: str, corrections_version=None):
+    """Lineage the installed amstrax makes for dtype with a corrections version (cached with the contexts)."""
+    key = (run6, dtype, corrections_version or None)
+    hit = _LINEAGE_CACHE.get(key)
+    if hit and time.time() - hit[0] < _CTX_TTL_S:
+        return hit[1]
+    try:
+        st = _context(corrections_version, led=dtype in ("records_led", "led_calibration"))
+        lineage = st.key_for(run6, dtype).lineage_hash
+    except Exception:
+        lineage = None
+    _LINEAGE_CACHE[key] = (time.time(), lineage)
+    return lineage
+
+
+def _version_key(v: str):
+    if v == "online":
+        return (0, 0, v)
+    m = re.match(r"^v(\d+)$", v)
+    return (1, int(m.group(1)), v) if m else (2, 0, v)
+
+
+def processing_up_to_date(run_id: int, data_entries: List[Dict[str, Any]], dtype: str = "event_info") -> Dict[str, Any]:
+    """Is the newest-version product of a run what the installed amstrax would make now?
+
+    status: "current"  - a stored entry of the newest corrections version has the current lineage
+            "outdated" - entries of that version exist, but none with the current lineage (reprocess)
+            "none"     - no entry of this data type
+    """
+    run6 = "{:06d}".format(int(run_id))
+    by_version: Dict[str, set] = {}
+    for e in data_entries or []:
+        if not isinstance(e, dict) or e.get("type") != dtype:
+            continue
+        v = str(e.get("corrections_version") or "online")
+        by_version.setdefault(v, set()).add(str(e.get("lineage_hash") or e.get("lineage") or e.get("hash") or ""))
+    if not by_version:
+        return {"run_id": int(run_id), "status": "none", "version": None}
+    newest = sorted(by_version, key=_version_key)[-1]
+    current = _current_lineage(run6, dtype, None if newest == "online" else newest)
+    if current is None:
+        return {"run_id": int(run_id), "status": "unknown", "version": newest}
+    status = "current" if current in by_version[newest] else "outdated"
+    return {"run_id": int(run_id), "status": status, "version": newest, "current_lineage": current}
 
 
 def scan_disk_availability(run_id: int) -> List[Dict[str, Any]]:

@@ -1,4 +1,4 @@
-let state={page:1,pageSize:30,total:0,nPages:1,rows:[],selectedRun:null,selectedRuns:new Set(),plotData:null,waveIdx:0,activeScienceRun:''};
+let state={uptodate:{},page:1,pageSize:30,total:0,nPages:1,rows:[],selectedRun:null,selectedRuns:new Set(),plotData:null,waveIdx:0,activeScienceRun:''};
 const $=id=>document.getElementById(id);
 
 function fmt(v){if(!v)return '';try{return new Date(v).toLocaleString();}catch{return String(v)}}
@@ -12,6 +12,7 @@ function debounce(fn, ms=300){
 }
 
 async function fetchRuns(){
+  state.uptodate={};  // server caches the lineages, so a refresh is cheap and picks up reprocessed runs
   const q=encodeURIComponent($('search').value||'');
   const st=encodeURIComponent($('statusFilter').value||'');
   const sr=encodeURIComponent($('srFilter').value||'');
@@ -27,6 +28,7 @@ async function fetchRuns(){
     history.replaceState(null,'',`?run_id=${state.selectedRun}`);
   }
   renderRuns();
+  fetchUpToDate();
 }
 
 function statusText(row){
@@ -51,8 +53,24 @@ function statusClass(row){
 function corrText(row){
   const c=row.corrections||[];
   if(!c.length) return '<span class="warn">-</span>';
-  // newest version bold
-  return c.map((v,i)=>i===c.length-1?`<strong>${esc(v)}</strong>`:esc(v)).join(', ');
+  // newest version bold, then whether that product is what the current amstrax makes
+  const txt=c.map((v,i)=>i===c.length-1?`<strong>${esc(v)}</strong>`:esc(v)).join(', ');
+  const u=state.uptodate[row.run_id];
+  if(!u) return txt+' <span class="hint" title="checking...">…</span>';
+  if(u.status==='current') return txt+' <span class="good" title="event_info '+esc(u.version)+' is up to date with the installed amstrax">✓</span>';
+  if(u.status==='outdated') return txt+' <span class="warn" title="event_info '+esc(u.version)+' was made by older amstrax code: reprocess">outdated</span>';
+  return txt;
+}
+
+async function fetchUpToDate(){
+  const ids=state.rows.map(r=>r.run_id).filter(id=>!(id in state.uptodate));
+  if(!ids.length) return;
+  try{
+    const r=await fetch(`/api/runs/uptodate?run_ids=${ids.join(',')}`);
+    const j=await r.json();
+    for(const id of ids) state.uptodate[id]=j[String(id)]||{status:'none'};
+    renderRuns();
+  }catch(_e){}
 }
 
 function renderRuns(){
