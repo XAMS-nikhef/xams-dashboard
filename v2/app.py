@@ -7,7 +7,7 @@ from flask import Flask, jsonify, render_template, request, redirect
 
 from backend.deletion_service import delete_run_disk_data
 from backend.events_loader import load_event_features
-from backend.loadability import check_is_stored, scan_disk_availability
+from backend.loadability import check_is_stored, processing_up_to_date, scan_disk_availability
 from backend.mongo_service import MongoService
 from backend.processing_service import ProcessingService
 from backend.config import settings
@@ -141,6 +141,19 @@ def v2_runs():
             'active_science_run': mongo.get_active_science_run(),
         }
     )
+
+
+@app.get('/api/runs/uptodate')
+@app.get('/api/v2/runs/uptodate')
+def v2_runs_uptodate():
+    """Up-to-date status of event_info for a list of runs (slow: builds lineages; called after the table)."""
+    ids = [int(x) for x in (request.args.get('run_ids') or '').split(',') if x.strip().isdigit()][:200]
+    docs = mongo.runs.find({'number': {'$in': ids}}, {'number': 1, 'data.type': 1, 'data.corrections_version': 1,
+                                                      'data.lineage_hash': 1, '_id': 0})
+    out = {}
+    for d in docs:
+        out[str(d['number'])] = processing_up_to_date(d['number'], d.get('data') or [])
+    return jsonify(out)
 
 
 @app.get('/api/meta')
