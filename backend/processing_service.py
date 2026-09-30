@@ -13,13 +13,50 @@ from typing import Dict, List, Optional, Union, Tuple
 from .config import settings
 
 
+_RE_SUBMITTED = re.compile(r"Job (\S+) submitted successfully")
+_RE_BUSY = re.compile(r"Too many jobs running \((\d+)/(\d+)\)")
+_RE_DRY = re.compile(r"Would have submitted job for run")
+_RE_ERROR = re.compile(r"Error submitting job: (.*)")
+
+
+def parse_submit_output(returncode: int, text: str) -> dict:
+    """Classify the outcome of one `auto_processing.py --run_id` call.
+
+    auto_processing exits 0 also when it refuses to submit, so the log text decides:
+    submitted / busy (job limit reached) / dry_run / failed.
+    """
+    text = text or ""
+    m = _RE_SUBMITTED.search(text)
+    if m:
+        return {"status": "submitted", "job_name": m.group(1), "reason": "Condor job {} submitted".format(m.group(1))}
+    m = _RE_BUSY.search(text)
+    if m:
+        return {
+            "status": "busy",
+            "job_name": None,
+            "reason": "job limit reached ({}/{} runs submitted/running in the run DB)".format(m.group(1), m.group(2)),
+        }
+    if _RE_DRY.search(text):
+        return {"status": "dry_run", "job_name": None, "reason": "dry run: auto_processing would have submitted"}
+    m = _RE_ERROR.search(text)
+    if m:
+        return {"status": "failed", "job_name": None, "reason": "condor_submit failed: {}".format(m.group(1).strip())}
+    if returncode != 0:
+        lines = [ln for ln in text.strip().splitlines() if ln.strip()]
+        return {"status": "failed", "job_name": None, "reason": lines[-1][-300:] if lines else "exit code {}".format(returncode)}
+    return {"status": "failed", "job_name": None, "reason": "auto_processing finished without submitting (see output)"}
+
+
 class ProcessingService:
-    def __init__(self, amstrax_dir: str  = None, log_dir: str  = None, output_dir: str  = None):
+    def __init__(self, amstrax_dir: str  = None, log_dir: str  = None, output_dir: str  = None,
+                 submit_mode: str = None, max_jobs: int = None):
         self.amstrax_dir = amstrax_dir or settings.stbc_amstrax_dir
         self.log_dir = log_dir or settings.stbc_log_dir
         self.output_dir = output_dir or settings.stbc_output_dir
         self._last_submit_by_run = {}  # type: Dict[int, float]
         self._cooldown_seconds = 45
+        self.submit_mode = submit_mode or settings.submit_mode
+        self.max_jobs = int(max_jobs or settings.max_jobs)
         self._resource_profiles = {
             "8gb": {"mem": 8000, "queue": "short"},
             "16gb": {"mem": 16000, "queue": "short"},
@@ -317,6 +354,8 @@ class ProcessingService:
                 "returncode": 409,
                 "stdout": "",
                 "stderr": "Submission blocked: cooldown active for this run. Wait and refresh status.",
+                "status": "skipped",
+                "reason": "submitted less than {} s ago".format(self._cooldown_seconds),
             }
         if corrections_version:
             ok, reason = self._validate_corrections_coverage(int(run_id), str(corrections_version))
@@ -332,11 +371,23 @@ class ProcessingService:
                     "returncode": 422,
                     "stdout": "",
                     "stderr": reason,
+                    "status": "failed",
+                    "reason": reason,
                 }
 
         run_id_s = f"{int(run_id):06d}"
-        target_label = "_".join(targets)
-        job_name = f"process_{run_id_s}_manual_{target_label}_{datetime.utcnow().strftime('%Y%m%d%H%M%S')}"
+        base = {
+            "run_id": int(run_id),
+            "target": targets,
+            "corrections_version": corrections_version,
+            "amstrax_ref": amstrax_ref,
+            "amstrax_path": amstrax_path,
+            "resource_profile": resource_profile,
+        }
+        if self.submit_mode == "off":
+            return dict(base, job_name=None, submitted=False, status="disabled", returncode=403,
+                        reason="submission disabled on this dashboard instance (XAMS_DASH_SUBMIT=off)",
+                        stdout="", stderr="")
 
         cmd = [
             "python",
@@ -346,7 +397,10 @@ class ProcessingService:
             "--target",
         ]
         cmd.extend(targets)
-        cmd.extend(["--output_folder", self.output_dir, "--production"])
+        cmd.extend(["--output_folder", self.output_dir])
+        if self.submit_mode == "on":
+            cmd.append("--production")
+        cmd.extend(["--max_jobs", str(int(self.max_jobs))])
         cmd.extend(["--mem", str(int(rp["mem"]))])
         cmd.extend(["--queue", str(rp["queue"])])
         if corrections_version:
@@ -355,36 +409,24 @@ class ProcessingService:
             cmd.extend(["--amstrax_path", str(amstrax_path)])
         try:
             os.makedirs(self.log_dir, exist_ok=True)
-            p = subprocess.run(cmd, cwd=self.amstrax_dir, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
-            if p.returncode == 0:
+            p = subprocess.run(cmd, cwd=self.amstrax_dir, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                               text=True, timeout=600)
+            outcome = parse_submit_output(p.returncode, (p.stdout or "") + "\n" + (p.stderr or ""))
+            if outcome["status"] == "submitted":
                 self._last_submit_by_run[int(run_id)] = now
-            return {
-                "run_id": int(run_id),
-                "target": targets,
-                "corrections_version": corrections_version,
-                "amstrax_ref": amstrax_ref,
-                "amstrax_path": amstrax_path,
-                "resource_profile": resource_profile,
-                "job_name": job_name,
-                "submitted": p.returncode == 0,
-                "returncode": p.returncode,
-                "stdout": p.stdout[-4000:],
-                "stderr": p.stderr[-4000:],
-            }
+            return dict(
+                base,
+                job_name=outcome["job_name"],
+                submitted=outcome["status"] == "submitted",
+                status=outcome["status"],
+                reason=outcome["reason"],
+                returncode=p.returncode,
+                stdout=p.stdout[-4000:],
+                stderr=p.stderr[-4000:],
+            )
         except Exception as e:
-            return {
-                "run_id": int(run_id),
-                "target": targets,
-                "corrections_version": corrections_version,
-                "amstrax_ref": amstrax_ref,
-                "amstrax_path": amstrax_path,
-                "resource_profile": resource_profile,
-                "job_name": job_name,
-                "submitted": False,
-                "returncode": -1,
-                "stdout": "",
-                "stderr": str(e),
-            }
+            return dict(base, job_name=None, submitted=False, status="failed", reason=str(e),
+                        returncode=-1, stdout="", stderr=str(e))
 
     def get_run_job_logs(self, run_id: int, limit: int = 6) -> dict:
         run_token = f"{int(run_id):06d}"

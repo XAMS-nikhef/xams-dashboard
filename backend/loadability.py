@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import time
 from typing import Any, Dict, List
 
 from .config import settings
@@ -85,37 +86,61 @@ def _run_db_data_metadata(run_id: int) -> Dict[tuple[str, str], Dict[str, Any]]:
     return out
 
 
+_CTX_CACHE: Dict[Any, Any] = {}
+_CTX_TTL_S = 3600
+
+
+def _context(corrections_version=None, led=False):
+    """amstrax context for a corrections version (None = default), cached for an hour."""
+    key = ("led" if led else "xams", corrections_version or None)
+    hit = _CTX_CACHE.get(key)
+    if hit and time.time() - hit[0] < _CTX_TTL_S:
+        return hit[1]
+    import amstrax  # type: ignore
+
+    kwargs = {"output_folder": settings.stbc_output_dir}
+    if corrections_version and corrections_version != "online":
+        kwargs["corrections_version"] = corrections_version
+    factory = amstrax.contexts.xams_led if led else amstrax.contexts.xams
+    st = factory(**kwargs)
+    _CTX_CACHE[key] = (time.time(), st)
+    return st
+
+
+def _expected(run6: str, dtype: str, corrections_version=None):
+    """(lineage_hash, is_stored) of dtype for this run in the context of a corrections version."""
+    try:
+        st = _context(corrections_version, led=dtype in ("records_led", "led_calibration"))
+    except Exception:
+        return None, False
+    try:
+        lineage = st.key_for(run6, dtype).lineage_hash
+    except Exception:
+        lineage = None
+    try:
+        stored = bool(st.is_stored(run6, dtype))
+    except Exception:
+        stored = False
+    return lineage, stored
+
+
 def scan_disk_availability(run_id: int) -> List[Dict[str, Any]]:
+    """Datasets of a run on disk, each judged against the corrections version it was made with.
+
+    A dataset is loadable when its lineage equals what the installed amstrax
+    produces for the corrections version recorded in the run DB (or for the default
+    context when no version was recorded).
+    """
     run6 = "{:06d}".format(int(run_id))
     rows = []
-    current_lineage = {}
-    type_is_stored = {}
     db_meta = _run_db_data_metadata(run_id)
+    expected: Dict[tuple, tuple] = {}
 
-    try:
-        import amstrax  # type: ignore
-
-        st = amstrax.contexts.xams(output_folder=settings.stbc_output_dir)
-        st_led = None
-        try:
-            st_led = amstrax.contexts.xams_led(output_folder=settings.stbc_output_dir)
-        except Exception:
-            st_led = None
-        run6 = "{:06d}".format(int(run_id))
-        for t in TARGET_TYPES:
-            ctx = st_led if (t in ("records_led", "led_calibration") and st_led is not None) else st
-            try:
-                type_is_stored[t] = bool(ctx.is_stored(run6, t))
-            except Exception:
-                type_is_stored[t] = False
-            try:
-                current_lineage[t] = ctx.key_for(run6, t).lineage_hash
-            except Exception:
-                current_lineage[t] = None
-    except Exception:
-        for t in TARGET_TYPES:
-            type_is_stored[t] = False
-            current_lineage[t] = None
+    def _exp(dtype, version):
+        k = (dtype, version or None)
+        if k not in expected:
+            expected[k] = _expected(run6, dtype, version)
+        return expected[k]
 
     for base in _storage_locations():
         if not os.path.isdir(base):
@@ -149,32 +174,37 @@ def scan_disk_availability(run_id: int) -> List[Dict[str, Any]]:
             except Exception:
                 pass
 
-            md = db_meta.get((meta["type"], meta["lineage_hash"])) or db_meta.get((meta["type"], "")) or {}
+            md = db_meta.get((meta["type"], meta["lineage_hash"])) or {}
+            version = md.get("db_corrections_version")
+            exp_lineage, stored = _exp(meta["type"], version)
+            matched_version = version
+            if exp_lineage != meta["lineage_hash"] and version:
+                # e.g. peak_basics made in a v4 job but identical to the default lineage
+                d_lineage, d_stored = _exp(meta["type"], None)
+                if d_lineage == meta["lineage_hash"]:
+                    exp_lineage, stored, matched_version = d_lineage, d_stored, None
+            loadable = bool(n_files > 0 and exp_lineage is not None and exp_lineage == meta["lineage_hash"])
             rows.append(
                 {
                     "type": meta["type"],
                     "lineage_hash": meta["lineage_hash"],
-                    "current_lineage_hash": current_lineage.get(meta["type"]),
+                    "current_lineage_hash": exp_lineage,
                     "location": base,
                     "dataset_dir": d,
                     "n_files": n_files,
                     "size_mb": round(size_mb, 2),
-                    "loadable": bool(
-                        n_files > 0
-                        and type_is_stored.get(meta["type"], False)
-                        and current_lineage.get(meta["type"]) == meta["lineage_hash"]
-                    ),
-                    "is_stored_for_type": type_is_stored.get(meta["type"], False),
+                    "loadable": loadable,
+                    "is_stored_for_type": stored,
                     "reason": _reason(
                         n_files=n_files,
-                        dtype=meta["type"],
+                        in_db=bool(md),
+                        version=matched_version,
+                        expected=exp_lineage,
                         disk_lineage=meta["lineage_hash"],
-                        current_lineage=current_lineage.get(meta["type"]),
-                        is_stored=type_is_stored.get(meta["type"], False),
                     ),
                     "db_host": md.get("db_host"),
                     "db_location": md.get("db_location"),
-                    "db_corrections_version": md.get("db_corrections_version"),
+                    "db_corrections_version": version,
                     "db_amstrax_version": md.get("db_amstrax_version"),
                     "db_is_online": md.get("db_is_online"),
                 }
@@ -196,11 +226,15 @@ def check_is_stored(run_id: int, data_type: str) -> bool:
         return False
 
 
-def _reason(n_files: int, dtype: str, disk_lineage: str, current_lineage: str, is_stored: bool) -> str:
+def _reason(n_files: int, in_db: bool, version, expected, disk_lineage: str) -> str:
+    ctx = "corrections {}".format(version) if version else "the default (online) context"
     if n_files == 0:
         return "directory exists but empty"
-    if not is_stored:
-        return "on disk, but not stored in current context ({})".format(dtype)
-    if current_lineage != disk_lineage:
-        return "on disk, but lineage mismatch with current context"
-    return "loadable with current context"
+    if expected is None:
+        return "could not build the amstrax context for {}".format(ctx)
+    if expected == disk_lineage:
+        return "OK: loadable with {}".format(ctx)
+    if not in_db:
+        return "not registered in the run DB; not made by the installed amstrax with {}".format(ctx)
+    return ("older product: the installed amstrax makes a different lineage with {} "
+            "(plugin or option changed since); reprocess to update").format(ctx)

@@ -29,11 +29,37 @@ async function fetchRuns(){
   renderRuns();
 }
 
+function statusText(row){
+  let t=row.status||'unknown';
+  if(row.condor) t+=` (condor: ${row.condor})`;
+  else if(row.stale) t+=' (stale: no Condor job)';
+  if(row.queued) t+=' [waiting list]';
+  return t;
+}
+function statusTitle(row){
+  if(row.stale) return 'The run DB says submitted/running but there is no Condor job for this run. It still counts towards the job limit of auto_processing.';
+  if(row.queued) return 'On the dashboard waiting list; submitted automatically when the job limit leaves room.';
+  return '';
+}
+function statusClass(row){
+  if(row.stale) return 'bad';
+  if(row.condor==='held') return 'bad';
+  if(row.condor||row.queued) return 'warn';
+  if(row.status==='failed') return 'bad';
+  return '';
+}
+function corrText(row){
+  const c=row.corrections||[];
+  if(!c.length) return '<span class="warn">-</span>';
+  // newest version bold
+  return c.map((v,i)=>i===c.length-1?`<strong>${esc(v)}</strong>`:esc(v)).join(', ');
+}
+
 function renderRuns(){
   const tb=$('runsTable').querySelector('tbody'); tb.innerHTML='';
   for(const row of state.rows){
     const tr=document.createElement('tr'); if(state.selectedRun===row.run_id)tr.classList.add('selected');
-    tr.innerHTML=`<td><input type="checkbox" ${state.selectedRuns.has(row.run_id)?'checked':''}></td><td>${row.run_id}</td><td>${esc(row.science_run_id||'-')}</td><td>${esc(row.run_class||'-')}</td><td>${esc(row.source_type||'-')}</td><td>${esc(row.mode)}</td><td class="${row.has_raw_records?'good':'bad'}">${row.has_raw_records?'yes':'no'}</td><td class="${row.has_event_info?'good':'warn'}">${row.has_event_info?'yes':'no'}</td><td class="${row.has_led_calibration?'good':'warn'}">${row.has_led_calibration?'yes':'no'}</td><td>${esc(row.status)}</td><td>${fmt(row.start)}</td>`;
+    tr.innerHTML=`<td><input type="checkbox" ${state.selectedRuns.has(row.run_id)?'checked':''}></td><td>${row.run_id}</td><td>${esc(row.science_run_id||'-')}</td><td>${esc(row.run_class||'-')}</td><td>${esc(row.source_type||'-')}</td><td>${esc(row.mode)}</td><td class="${row.has_raw_records?'good':'bad'}">${row.has_raw_records?'yes':'no'}</td><td class="${row.has_event_info?'good':'warn'}">${row.has_event_info?'yes':'no'}</td><td class="${row.has_led_calibration?'good':'warn'}">${row.has_led_calibration?'yes':'no'}</td><td class="${statusClass(row)}" title="${esc(statusTitle(row))}">${esc(statusText(row))}</td><td>${corrText(row)}</td><td>${fmt(row.start)}</td>`;
     tr.querySelector('input').addEventListener('click',e=>{e.stopPropagation(); if(e.target.checked)state.selectedRuns.add(row.run_id); else state.selectedRuns.delete(row.run_id)});
     tr.addEventListener('click',()=>{state.selectedRun=row.run_id; history.replaceState(null,'',`?run_id=${row.run_id}`); renderRuns(); loadRun(row.run_id)});
     tb.appendChild(tr);
@@ -222,34 +248,88 @@ async function submitFocused(){
   await submitRunIds([runId], 'focused');
 }
 
+const SUBMIT_LABEL={submitted:'submitted to Condor',queued:'waiting list',skipped:'skipped',failed:'FAILED',dry_run:'dry run (not submitted)',disabled:'not submitted (submission disabled)'};
+const SUBMIT_CLASS={submitted:'good',queued:'warn',skipped:'',failed:'bad',dry_run:'warn',disabled:'bad'};
+
+function renderSubmitTable(rows){
+  const tb=$('submitTable').querySelector('tbody'); tb.innerHTML='';
+  for(const r of rows){
+    const tr=document.createElement('tr');
+    const st=r.status||'pending';
+    let why=r.reason||'';
+    if(st==='failed' && !why) why=(r.stderr||`exit code ${r.returncode ?? '?'}`).toString().slice(-300);
+    if(r.job_name) why=`${why}`;
+    tr.innerHTML=`<td>${r.run_id}</td><td class="${SUBMIT_CLASS[st]||''}">${esc(SUBMIT_LABEL[st]||st)}</td><td>${esc(r.corrections_version||'default')}</td><td>${esc((r.target||r.targets||[]).join?.(', ')||'')}</td><td>${esc(why)}</td>`;
+    tb.appendChild(tr);
+  }
+  $('submitTable').style.display=rows.length?'':'none';
+}
+
 async function submitRunIds(run_ids, label){
   const amstrax_ref=($('amstraxRef').value||'').trim();
   const corrections_version=($('corrVersion').value||'').trim();
   const resource_profile=($('resourceProfile').value||'8gb').trim();
-  $('submitResult').textContent=`Submitting ${label}...`;
+  const btns=[$('submitSelected'),$('submitFocused')];
+  btns.forEach(b=>b.disabled=true);
   if($('submitDetails')) $('submitDetails').textContent='';
-  const r=await fetch('/api/submit',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({run_ids,targets:['peak_basics','event_basics','event_positions','event_info'],amstrax_ref,corrections_version,resource_profile})});
-  const j=await r.json();
-  $('submitResult').textContent=`Submitted ${j.submitted}, skipped ${j.skipped}, failed ${j.failed}`;
-  const results=(j.results||[]);
-  const lines=[];
-  for(const row of results){
-    const runId=row.run_id;
-    if(row.submitted){
-      lines.push(`run ${runId}: submitted`);
-      continue;
+  const rows=run_ids.map(id=>({run_id:id,status:'pending',reason:'waiting to be sent',corrections_version}));
+  renderSubmitTable(rows);
+  let queueOnly=false;
+  const t0=Date.now();
+  // one request per run so every result shows up as soon as it is known
+  for(let i=0;i<run_ids.length;i++){
+    rows[i].reason=queueOnly?'adding to waiting list...':'running auto_processing (takes ~15 s)...';
+    rows[i].status='working';
+    renderSubmitTable(rows);
+    $('submitResult').textContent=`Processing ${label}: run ${i+1} of ${run_ids.length} (${Math.round((Date.now()-t0)/1000)} s)`;
+    try{
+      const r=await fetch('/api/submit',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({run_ids:[run_ids[i]],targets:['peak_basics','event_basics','event_positions','event_info'],amstrax_ref,corrections_version,resource_profile,queue_only:queueOnly})});
+      const j=await r.json();
+      if(j.submit_mode && j.submit_mode!=='on') $('submitMode').textContent=`Submission mode: ${j.submit_mode}`;
+      Object.assign(rows[i], (j.results||[])[0]||{status:'failed',reason:`HTTP ${r.status}`});
+      if(rows[i].status==='queued') queueOnly=true;
+    }catch(e){
+      Object.assign(rows[i],{status:'failed',reason:String(e)});
     }
-    if(row.status==='skipped'){
-      lines.push(`run ${runId}: skipped - ${row.reason||'already loadable'}`);
-      continue;
-    }
-    const err=(row.stderr||row.reason||`failed (code ${row.returncode ?? 'unknown'})`).toString();
-    lines.push(`run ${runId}: failed - ${err}`);
+    renderSubmitTable(rows);
   }
-  if($('submitDetails')){
-    $('submitDetails').textContent = lines.length ? lines.join('\n') : 'No detailed result returned.';
-  }
+  const counts={};
+  for(const r of rows) counts[r.status]=(counts[r.status]||0)+1;
+  $('submitResult').textContent='Done: '+Object.entries(counts).map(([k,v])=>`${v} ${SUBMIT_LABEL[k]||k}`).join(', ');
+  btns.forEach(b=>b.disabled=false);
+  refreshQueue();
   fetchRuns();
+}
+
+async function refreshQueue(){
+  try{
+    const r=await fetch('/api/queue'); const j=await r.json();
+    const items=j.items||[];
+    $('submitMode').textContent=(j.submit_mode&&j.submit_mode!=='on')?`Submission mode: ${j.submit_mode} (no Condor jobs are submitted from this instance)`:`Job limit: ${j.max_jobs} runs submitted/running`;
+    $('queueInfo').textContent=items.length
+      ?`${items.length} run(s) waiting; retried every ${j.interval_s} s. Last try: ${j.last_attempt?fmt(j.last_attempt+'Z'):'-'} ${j.last_message||''}`
+      :'Waiting list empty.';
+    const tb=$('queueTable').querySelector('tbody'); tb.innerHTML='';
+    for(const it of items){
+      const tr=document.createElement('tr');
+      tr.innerHTML=`<td>${it.run_id}</td><td>${esc(it.corrections_version||'default')}</td><td>${fmt(it.queued_at+'Z')}</td><td>${it.attempts||0}</td><td>${esc(it.last_reason||'')}</td><td><button>Remove</button></td>`;
+      tr.querySelector('button').onclick=async()=>{await fetch('/api/queue/remove',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({run_id:it.run_id})}); refreshQueue(); fetchRuns();};
+      tb.appendChild(tr);
+    }
+    $('queueTable').style.display=items.length?'':'none';
+  }catch(_e){}
+}
+
+async function retryQueue(){
+  $('queueInfo').textContent='Trying waiting list now...';
+  await fetch('/api/queue/retry',{method:'POST'});
+  refreshQueue(); fetchRuns();
+}
+
+async function clearQueue(){
+  if(!confirm('Remove all runs from the waiting list?')) return;
+  await fetch('/api/queue/remove',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({run_id:'all'})});
+  refreshQueue(); fetchRuns();
 }
 
 async function loadMeta(){
@@ -282,7 +362,7 @@ async function refreshHeldJobs(){
     const c=jq.counts||{};
     $('heldJobs').textContent=`held ${c.held||0}, running ${c.running||0}, idle ${c.idle||0}`;
     const rows=(jq.rows||[]).slice(0,8);
-    $('jobsList').textContent=rows.map(r=>`${r.cluster_id}.${r.proc_id} ${r.status} ${r.batch_name||''}`).join('\n');
+    $('jobsList').textContent=rows.map(r=>`${r.cluster_id}.${r.proc_id} ${r.status} ${r.job||r.batch_name||''}`).join('\n');
   }catch(_e){}
 }
 
@@ -374,6 +454,8 @@ function init(){
   $('prevPage').onclick=()=>{state.page=Math.max(1,state.page-1);fetchRuns()};
   $('nextPage').onclick=()=>{state.page=Math.min(state.nPages,state.page+1);fetchRuns()};
   $('submitSelected').onclick=submitSelected;
+  $('retryQueue').onclick=retryQueue;
+  $('clearQueue').onclick=clearQueue;
   $('submitFocused').onclick=submitFocused;
   if($('deleteFocused')) $('deleteFocused').onclick=deleteFocused;
   if($('deleteSelected')) $('deleteSelected').onclick=deleteSelected;
@@ -399,6 +481,8 @@ function init(){
   loadMeta().then(()=>fetchRuns().then(()=>{if(state.selectedRun)loadRun(state.selectedRun)}));
   refreshHeldJobs();
   setInterval(refreshHeldJobs, 20000);
+  refreshQueue();
+  setInterval(refreshQueue, 30000);
 }
 
 document.addEventListener('DOMContentLoaded',init);

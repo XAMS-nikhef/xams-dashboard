@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Any
 
@@ -28,6 +28,8 @@ class RunSummary:
     science_run_id: str
     run_class: str
     source_type: str
+    # corrections versions of the stored event_info entries ("online" = no version recorded)
+    corrections: list[str] = field(default_factory=list)
 
 
 @dataclass

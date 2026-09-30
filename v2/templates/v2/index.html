@@ -50,7 +50,7 @@
         </div>
         <div class="table-wrap runs-table-wrap">
           <table id="runsTable">
-            <thead><tr><th></th><th>Run</th><th>SR</th><th>Class</th><th>Source</th><th>Mode</th><th>Raw</th><th>Events</th><th>Led</th><th>Status</th><th>Start</th></tr></thead>
+            <thead><tr><th></th><th>Run</th><th>SR</th><th>Class</th><th>Source</th><th>Mode</th><th>Raw</th><th>Events</th><th>Led</th><th>Status</th><th>Corrections</th><th>Start</th></tr></thead>
             <tbody></tbody>
           </table>
         </div>
@@ -123,7 +123,7 @@
             </div>
             <div class="batch-actions">
               <input id="amstraxRef" placeholder="amstrax ref/path (optional)" />
-              <input id="corrVersion" placeholder="corrections version (optional)" />
+              <input id="corrVersion" placeholder="corrections version, e.g. v4 (empty = default)" />
               <select id="resourceProfile">
                 <option value="8gb">8GB</option>
                 <option value="16gb">16GB</option>
@@ -135,7 +135,17 @@
               <button id="deleteSelected" class="btn-danger">Delete Data (Selected)</button>
               <span id="submitResult"></span>
             </div>
+            <div class="hint" id="submitMode"></div>
+            <div class="table-wrap"><table id="submitTable" style="display:none"><thead><tr><th>Run</th><th>Result</th><th>Corrections</th><th>Targets</th><th>Details</th></tr></thead><tbody></tbody></table></div>
             <pre id="submitDetails"></pre>
+            <div class="panel-title small-top">Waiting List</div>
+            <div class="hint">Runs refused because the job limit was reached. They are submitted automatically, oldest first, when there is room.</div>
+            <div class="batch-actions">
+              <button id="retryQueue">Try Now</button>
+              <button id="clearQueue">Clear Waiting List</button>
+              <span id="queueInfo" class="hint"></span>
+            </div>
+            <div class="table-wrap"><table id="queueTable" style="display:none"><thead><tr><th>Run</th><th>Corrections</th><th>Queued</th><th>Tries</th><th>Last reason</th><th></th></tr></thead><tbody></tbody></table></div>
             <div class="hint">Automatic targets: LED runs -&gt; raw_records, records_led, led_calibration. Other runs -&gt; peak_basics, event_basics, event_positions, event_info.</div>
             <div class="panel-title small-top">Corrections Compatibility (Focused run)</div>
             <div class="batch-actions">

@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import os
+import re
 import subprocess
 import getpass
 from typing import Any, Optional
@@ -40,6 +42,25 @@ class MongoService:
         if isinstance(ps, str):
             return ps
         return "unknown"
+
+    @staticmethod
+    def _event_corrections(doc: dict[str, Any]) -> list[str]:
+        """Corrections versions with which event_info is stored for this run."""
+        found = []
+        for d in doc.get("data", []) or []:
+            if not isinstance(d, dict) or d.get("type") not in ("event_info", "events"):
+                continue
+            v = d.get("corrections_version") or "online"
+            if v not in found:
+                found.append(str(v))
+
+        def _key(v: str):
+            if v == "online":
+                return (0, 0, v)
+            m = re.match(r"^v(\d+)$", v)
+            return (1, int(m.group(1)), v) if m else (2, 0, v)
+
+        return sorted(found, key=_key)
 
     @staticmethod
     def _normalize_data_entry(entry: dict[str, Any]) -> DataEntry:
@@ -99,6 +120,7 @@ class MongoService:
                 "end": 1,
                 "processing_status": 1,
                 "data.type": 1,
+                "data.corrections_version": 1,
                 "xams_bookkeeping.science_run_id": 1,
                 "xams_bookkeeping.run_class": 1,
                 "xams_bookkeeping.source_type": 1,
@@ -127,6 +149,7 @@ class MongoService:
                     science_run_id=xbk.get("science_run_id") or "",
                     run_class=xbk.get("run_class") or "",
                     source_type=xbk.get("source_type") or "",
+                    corrections=self._event_corrections(doc),
                 )
             )
         return out
@@ -201,6 +224,7 @@ class MongoService:
                     "end": 1,
                     "processing_status": 1,
                     "data.type": 1,
+                    "data.corrections_version": 1,
                     "xams_bookkeeping.science_run_id": 1,
                     "xams_bookkeeping.run_class": 1,
                     "xams_bookkeeping.source_type": 1,
@@ -230,6 +254,7 @@ class MongoService:
                     science_run_id=xbk.get("science_run_id") or "",
                     run_class=xbk.get("run_class") or "",
                     source_type=xbk.get("source_type") or "",
+                    corrections=self._event_corrections(doc),
                 )
             )
         return out, int(total)
@@ -409,10 +434,43 @@ class MongoService:
             "preview": preview[:250],
         }
 
+    @staticmethod
+    def _condor_user() -> str:
+        return settings.condor_user or getpass.getuser()
+
+    def get_condor_runs(self) -> dict[int, str]:
+        """Map run number -> Condor job state for the processing jobs in the queue.
+
+        Jobs are recognised by their executable name (process_<run6>_....sh).
+        Returns an empty dict with key None set if condor_q could not be run.
+        """
+        state = {"1": "idle", "2": "running", "5": "held"}
+        cmd = ["condor_q", self._condor_user(), "-af", "ClusterId", "JobStatus", "Cmd"]
+        out: dict = {}
+        try:
+            p = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, check=False, timeout=30)
+            if p.returncode != 0:
+                return {None: "condor_q failed"}
+            for line in p.stdout.splitlines():
+                parts = line.strip().split(None, 2)
+                if len(parts) < 3:
+                    continue
+                m = re.search(r"process_(\d{6})", parts[2])
+                if not m:
+                    continue
+                run = int(m.group(1))
+                st = state.get(parts[1], "other")
+                # a running job wins over idle/held duplicates
+                if out.get(run) != "running":
+                    out[run] = st
+            return out
+        except Exception as e:
+            return {None: "condor_q failed: {}".format(e)}
+
     def get_held_jobs(self) -> list[dict[str, Any]]:
         cmd = [
             "condor_q",
-            getpass.getuser(),
+            self._condor_user(),
             "-hold",
             "-af",
             "ClusterId",
@@ -456,14 +514,15 @@ class MongoService:
         }
         cmd = [
             "condor_q",
-            getpass.getuser(),
+            self._condor_user(),
             "-nobatch",
             "-af",
             "ClusterId",
             "ProcId",
             "JobStatus",
-            "BatchName",
             "QDate",
+            "Cmd",
+            "BatchName",  # last: may contain spaces ("ID: 123")
         ]
         out_rows = []
         counts = {"idle": 0, "running": 0, "held": 0, "other": 0}
@@ -472,7 +531,7 @@ class MongoService:
             if p.returncode != 0:
                 return {"counts": counts, "rows": []}
             for line in p.stdout.splitlines():
-                parts = line.strip().split(None, 4)
+                parts = line.strip().split(None, 5)
                 if len(parts) < 5:
                     continue
                 st = status_map.get(parts[2], "other")
@@ -485,8 +544,9 @@ class MongoService:
                         "cluster_id": parts[0],
                         "proc_id": parts[1],
                         "status": st,
-                        "batch_name": parts[3],
-                        "qdate": parts[4],
+                        "batch_name": parts[5] if len(parts) > 5 else "",
+                        "qdate": parts[3],
+                        "job": os.path.basename(parts[4]).replace(".sh", ""),
                     }
                 )
             out_rows = sorted(out_rows, key=lambda r: (r["status"], r["cluster_id"]), reverse=True)[: max(1, limit)]

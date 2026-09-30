@@ -45,5 +45,19 @@ class Settings:
         "XAMS_STBC_OUTPUT_DIR", _XAMS.get("XAMS_PROCESSED_FOLDER", "/data/xenon/xams_v2/xams_processed")
     )
 
+    # Submission behaviour.
+    # submit_mode: "on" = submit Condor jobs, "dry" = run auto_processing without
+    # --production (nothing is submitted or written), "off" = refuse all submissions.
+    submit_mode: str = _cfg_env("XAMS_DASH_SUBMIT", "on").strip().lower()
+    # Passed to auto_processing.py --max_jobs (it counts runs with status submitted/running).
+    max_jobs: int = int(_cfg_env("XAMS_DASH_MAX_JOBS", "25"))
+    # Waiting list for runs refused because the job limit was reached.
+    queue_file: str = _cfg_env(
+        "XAMS_DASH_QUEUE_FILE", os.path.join(os.path.expanduser("~"), ".xams_dashboard_queue.json")
+    )
+    queue_interval_s: int = int(_cfg_env("XAMS_DASH_QUEUE_INTERVAL", "120"))
+    # Condor user whose jobs are shown / used for stale-status detection.
+    condor_user: str = _cfg_env("XAMS_DASH_CONDOR_USER", "")
+
 
 settings = Settings()
