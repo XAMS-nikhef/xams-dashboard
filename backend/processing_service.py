@@ -397,7 +397,7 @@ class ProcessingService:
             "--target",
         ]
         cmd.extend(targets)
-        cmd.extend(["--output_folder", self.output_dir])
+        cmd.extend(["--output_folder", self.output_dir, "--logs_path", settings.ap_log_dir])
         if self.submit_mode == "on":
             cmd.append("--production")
         cmd.extend(["--max_jobs", str(int(self.max_jobs))])

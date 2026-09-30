@@ -58,6 +58,8 @@ class Settings:
     queue_interval_s: int = int(_cfg_env("XAMS_DASH_QUEUE_INTERVAL", "120"))
     # Condor user whose jobs are shown / used for stale-status detection.
     condor_user: str = _cfg_env("XAMS_DASH_CONDOR_USER", "")
+    # Where auto_processing.py (called for each submission) writes its own log and job files.
+    ap_log_dir: str = _cfg_env("XAMS_DASH_AP_LOG_DIR", _cfg_env("XAMS_STBC_LOG_DIR", "/data/xenon/xams_v2/logs"))
 
 
 settings = Settings()
