@@ -225,7 +225,7 @@ function applyLogIfNeeded(z, useLog){
 async function deleteRunIds(run_ids, label){
   if(!run_ids.length){$('submitResult').textContent='No run selected';return;}
   const word=run_ids.length===1?'run':'runs';
-  if(!confirm(`Delete ALL data for ${run_ids.length} ${word} (${label})?\n\nThis wipes every data directory from disk and clears the data entries in the DB.\n\nThis cannot be undone.`)) return;
+  if(!confirm(`Delete the PROCESSED data for ${run_ids.length} ${word} (${label})?\n\nThis removes the processed data directories (peaks, events, event_info, LED products, ...) from disk and their entries in the DB.\nRaw data (raw_records) and live data, and their DB entries, are kept, so the run can be reprocessed.\n\nThis cannot be undone.`)) return;
   $('submitResult').textContent=`Deleting data for ${run_ids.length} ${word}...`;
   if($('submitDetails')) $('submitDetails').textContent='';
   const lines=[];
@@ -233,7 +233,7 @@ async function deleteRunIds(run_ids, label){
     try{
       const r=await fetch(`/api/run/${runId}/delete_data`,{method:'POST'});
       const j=await r.json();
-      lines.push(`run ${runId}: deleted ${j.n_deleted} dir(s)${j.n_errors?' | '+j.n_errors+' error(s)':''} | DB ${j.db.modified?'updated':'unchanged'}`);
+      lines.push(`run ${runId}: deleted ${j.n_deleted} dir(s), kept ${(j.disk&&j.disk.kept)?j.disk.kept.length:0} raw dir(s)${j.n_errors?' | '+j.n_errors+' error(s)':''} | DB ${j.db.modified?'updated':'unchanged'}`);
     }catch(e){
       lines.push(`run ${runId}: request failed - ${e}`);
     }
