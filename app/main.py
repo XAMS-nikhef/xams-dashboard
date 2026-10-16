@@ -312,13 +312,15 @@ def show_delete_confirm(_clicks, selected):
     run_id = (selected or {}).get("run_id")
     if run_id is None:
         raise PreventUpdate
-    availability = scan_disk_availability(int(run_id))
+    from backend.deletion_service import KEEP_TYPES
+
+    availability = [r for r in scan_disk_availability(int(run_id)) if r.get("type") not in KEEP_TYPES]
     n_dirs = len(availability)
     total_mb = sum(r.get("size_mb", 0) for r in availability)
     msg = (
-        "Delete ALL data for run {}?\n\n"
-        "This will remove {} director{} ({:.1f} MB) from disk "
-        "and clear all data entries + processing_status in the DB.\n\n"
+        "Delete the PROCESSED data for run {}?\n\n"
+        "This will remove {} director{} ({:.1f} MB) from disk and their data entries in the DB "
+        "(processing_status is reset). Raw and live data and their DB entries are kept.\n\n"
         "This cannot be undone."
     ).format(run_id, n_dirs, "y" if n_dirs == 1 else "ies", total_mb)
     return True, msg
