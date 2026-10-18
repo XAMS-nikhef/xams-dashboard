@@ -8,9 +8,13 @@ MEM=${XAMS_AUTOPROC_MEM:-16000}
 MAX_JOBS=${XAMS_AUTOPROC_MAX_JOBS:-25}
 QUEUE=${XAMS_AUTOPROC_QUEUE:-short}
 MIN_RUN_NUMBER=${XAMS_AUTOPROC_MIN_RUN_NUMBER:-6000}
+# Corrections set (amstrax_files corrections/_global/_global_<NAME>.json). PROD0 = approved gains + position map
+# (posrec v2); set XAMS_AUTOPROC_CORRECTIONS= (empty) to run without corrections.
+CORRECTIONS=${XAMS_AUTOPROC_CORRECTIONS-PROD0}
+CORR_ARG=${CORRECTIONS:+--corrections_version $CORRECTIONS}
 ENV_ACTIVATE=${XAMS_DASH_ENV_ACTIVATE:-"source /data/xenon/xams_v2/setup.sh"}
 
 screen -S "$SCREEN_NAME" -X quit || true
-screen -S "$SCREEN_NAME" -dm bash -lc "cd '$AMSTRAX_DIR' && $ENV_ACTIVATE && python auto_processing.py --target $TARGET --production --mem $MEM --max_jobs $MAX_JOBS --queue $QUEUE --min_run_number $MIN_RUN_NUMBER"
+screen -S "$SCREEN_NAME" -dm bash -lc "cd '$AMSTRAX_DIR' && $ENV_ACTIVATE && python auto_processing.py --target $TARGET $CORR_ARG --production --mem $MEM --max_jobs $MAX_JOBS --queue $QUEUE --min_run_number $MIN_RUN_NUMBER"
 
-echo "Started auto_processing screen '$SCREEN_NAME' target=$TARGET mem=$MEM max_jobs=$MAX_JOBS queue=$QUEUE"
+echo "Started auto_processing screen '$SCREEN_NAME' target=$TARGET mem=$MEM max_jobs=$MAX_JOBS queue=$QUEUE corrections=${CORRECTIONS:-none}"
