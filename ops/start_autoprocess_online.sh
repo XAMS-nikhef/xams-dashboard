@@ -14,7 +14,8 @@ CORRECTIONS=${XAMS_AUTOPROC_CORRECTIONS-PROD0}
 CORR_ARG=${CORRECTIONS:+--corrections_version $CORRECTIONS}
 ENV_ACTIVATE=${XAMS_DASH_ENV_ACTIVATE:-"source /data/xenon/xams_v2/setup.sh"}
 
-screen -S "$SCREEN_NAME" -X quit || true
+# Stop a running loop cleanly first (finishes its current step) instead of killing the screen.
+"$(dirname "$0")/stop_autoprocess_online.sh"
 screen -S "$SCREEN_NAME" -dm bash -lc "cd '$AMSTRAX_DIR' && $ENV_ACTIVATE && python auto_processing.py --target $TARGET $CORR_ARG --production --mem $MEM --max_jobs $MAX_JOBS --queue $QUEUE --min_run_number $MIN_RUN_NUMBER"
 
 echo "Started auto_processing screen '$SCREEN_NAME' target=$TARGET mem=$MEM max_jobs=$MAX_JOBS queue=$QUEUE corrections=${CORRECTIONS:-none}"
