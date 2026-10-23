@@ -476,11 +476,12 @@ class MongoService:
     def get_condor_runs(self) -> dict[int, str]:
         """Map run number -> Condor job state for the processing jobs in the queue.
 
-        Jobs are recognised by their executable name (process_<run6>_....sh).
+        Jobs are recognised by their executable name (process_<run6>_....sh) or, for simulated runs (xams-sim
+        production jobs), by their batch name (xamssim_<run6>).
         Returns an empty dict with key None set if condor_q could not be run.
         """
         state = {"1": "idle", "2": "running", "5": "held"}
-        cmd = ["condor_q", self._condor_user(), "-af", "ClusterId", "JobStatus", "Cmd"]
+        cmd = ["condor_q", self._condor_user(), "-af", "ClusterId", "JobStatus", "JobBatchName", "Cmd"]
         out: dict = {}
         try:
             p = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, check=False, timeout=30)
@@ -490,7 +491,7 @@ class MongoService:
                 parts = line.strip().split(None, 2)
                 if len(parts) < 3:
                     continue
-                m = re.search(r"process_(\d{6})", parts[2])
+                m = re.search(r"process_(\d{6})", parts[2]) or re.match(r"xamssim_(\d{6})\b", parts[2])
                 if not m:
                     continue
                 run = int(m.group(1))
