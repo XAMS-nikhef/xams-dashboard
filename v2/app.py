@@ -92,6 +92,7 @@ def v2_runs():
     source_type = (request.args.get('source_type') or '').strip()
     run_mode = (request.args.get('run_mode') or '').strip()
     use_active_sr = (request.args.get('use_active_sr') or '1').strip() != '0'
+    kind = 'mc' if (request.args.get('kind') or '').strip().lower() == 'mc' else 'data'   # simulated runs: run.runs_mc
     if science_run_id.lower() == 'all':
         science_run_id = ''
         use_active_sr = False
@@ -106,6 +107,7 @@ def v2_runs():
         run_class=run_class or None,
         source_type=source_type or None,
         default_active_sr=use_active_sr,
+        kind=kind,
     )
     condor = mongo.get_condor_runs()
     condor_ok = None not in condor
@@ -123,6 +125,8 @@ def v2_runs():
         'start': _serialize_dt(r.start),
         'end': _serialize_dt(r.end),
         'corrections': list(r.corrections or []),
+        'kind': r.kind,
+        'mc': _json_safe(r.mc),
         'condor': condor.get(r.number) or '',
         'queued': r.number in queued,
         'stale': (r.processing_status in ('submitted', 'running')
@@ -148,6 +152,7 @@ def v2_runs():
 def v2_runs_uptodate():
     """Up-to-date status of event_info for a list of runs (slow: builds lineages; called after the table)."""
     ids = [int(x) for x in (request.args.get('run_ids') or '').split(',') if x.strip().isdigit()][:200]
+    ids = [i for i in ids if not mongo.is_mc(i)]          # simulated runs: not judged here (yet)
     docs = mongo.runs.find({'number': {'$in': ids}}, {'number': 1, 'data.type': 1, 'data.corrections_version': 1,
                                                       'data.lineage_hash': 1, '_id': 0})
     out = {}
@@ -329,6 +334,10 @@ def _submit_request(req):
 
 def _prepare_request(run_id, requested_targets, corrections_version, amstrax_ref, resource_profile):
     """Work out targets for a run; returns (request, skip_result_or_None)."""
+    if mongo.is_mc(run_id):
+        # The auto-processing writes its status only to runs_gas so far; simulated runs are processed by the MC
+        # production (xams-sim stbc/production_job.sh) until it can write to runs_mc.
+        raise ValueError(f"run {run_id} is a simulated run: processing from the dashboard is not available yet")
     run_details = mongo.get_run_details(run_id)
     run_doc = run_details.raw_doc if run_details and isinstance(run_details.raw_doc, dict) else {}
     is_led = _is_led_run_doc(run_doc)
@@ -449,6 +458,8 @@ def v2_queue_retry():
 @app.post('/api/run/<int:run_id>/delete_data')
 @app.post('/api/v2/run/<int:run_id>/delete_data')
 def v2_delete_run_data(run_id: int):
+    if mongo.is_mc(run_id):
+        return jsonify({'error': 'simulated run: its data are managed by xams-sim, not here', 'run_id': run_id}), 400
     disk = delete_run_disk_data(run_id)
     db = mongo.delete_run_data_entries(run_id)
     return jsonify({'disk': disk, 'db': db,

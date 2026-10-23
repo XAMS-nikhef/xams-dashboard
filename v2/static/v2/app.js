@@ -20,7 +20,8 @@ async function fetchRuns(){
   const src=encodeURIComponent($('sourceTypeFilter').value||'');
   const mode=encodeURIComponent($('runModeFilter').value||'');
   const useActiveSr=sr&&sr!=='all'?'0':'1';
-  const r=await fetch(`/api/runs?page=${state.page}&page_size=${state.pageSize}&q=${q}&status=${st}&science_run_id=${sr}&run_class=${rc}&source_type=${src}&run_mode=${mode}&use_active_sr=${useActiveSr}`);
+  const kind=encodeURIComponent($('kindFilter').value||'data');
+  const r=await fetch(`/api/runs?page=${state.page}&page_size=${state.pageSize}&q=${q}&status=${st}&science_run_id=${sr}&run_class=${rc}&source_type=${src}&run_mode=${mode}&use_active_sr=${useActiveSr}&kind=${kind}`);
   const j=await r.json(); Object.assign(state,{total:j.total,nPages:j.n_pages,page:j.page,rows:j.rows,activeScienceRun:j.active_science_run||''});
   $('activeSrBadge').textContent=state.activeScienceRun?`(active: ${state.activeScienceRun})`:'';
   if(!state.selectedRun && state.rows.length){
@@ -77,7 +78,7 @@ function renderRuns(){
   const tb=$('runsTable').querySelector('tbody'); tb.innerHTML='';
   for(const row of state.rows){
     const tr=document.createElement('tr'); if(state.selectedRun===row.run_id)tr.classList.add('selected');
-    tr.innerHTML=`<td><input type="checkbox" ${state.selectedRuns.has(row.run_id)?'checked':''}></td><td>${row.run_id}</td><td>${esc(row.science_run_id||'-')}</td><td>${esc(row.run_class||'-')}</td><td>${esc(row.source_type||'-')}</td><td>${esc(row.mode)}</td><td class="${row.has_raw_records?'good':'bad'}">${row.has_raw_records?'yes':'no'}</td><td class="${row.has_event_info?'good':'warn'}">${row.has_event_info?'yes':'no'}</td><td class="${row.has_led_calibration?'good':'warn'}">${row.has_led_calibration?'yes':'no'}</td><td class="${statusClass(row)}" title="${esc(statusTitle(row))}">${esc(statusText(row))}</td><td>${corrText(row)}</td><td>${fmt(row.start)}</td>`;
+    tr.innerHTML=`<td><input type="checkbox" ${state.selectedRuns.has(row.run_id)?'checked':''}></td><td>${row.run_id}</td>${row.kind==='mc'?`<td title="simulated run (xams-sim, run.runs_mc)"><span class="mc-badge">MC</span> ${esc((row.mc&&row.mc.tags||[]).filter(t=>t!=='simulation').join(', '))}</td><td>${esc(row.mc&&row.mc.state||'-')}</td><td title="${esc(row.mc&&row.mc.n_events?row.mc.n_events.toExponential(1)+' decays':'')}">${esc(row.mc&&row.mc.source||'-')}</td>`:`<td>${esc(row.science_run_id||'-')}</td><td>${esc(row.run_class||'-')}</td><td>${esc(row.source_type||'-')}</td>`}<td>${esc(row.mode)}</td><td class="${row.has_raw_records?'good':'bad'}">${row.has_raw_records?'yes':'no'}</td><td class="${row.has_event_info?'good':'warn'}">${row.has_event_info?'yes':'no'}</td><td class="${row.has_led_calibration?'good':'warn'}">${row.has_led_calibration?'yes':'no'}</td><td class="${statusClass(row)}" title="${esc(statusTitle(row))}">${esc(statusText(row))}</td><td>${corrText(row)}</td><td>${fmt(row.start)}</td>`;
     tr.querySelector('input').addEventListener('click',e=>{e.stopPropagation(); if(e.target.checked)state.selectedRuns.add(row.run_id); else state.selectedRuns.delete(row.run_id)});
     tr.addEventListener('click',()=>{state.selectedRun=row.run_id; history.replaceState(null,'',`?run_id=${row.run_id}`); renderRuns(); loadRun(row.run_id)});
     tb.appendChild(tr);
@@ -98,8 +99,16 @@ async function loadRun(runId){
     const run=runR.value; const ps=run.processing_status||{};
     const xbk=(run.raw_doc&&run.raw_doc.xams_bookkeeping)||{};
     const ph=(run.raw_doc&&run.raw_doc.processing_history)||[];
+    const sim=(run.raw_doc&&run.raw_doc.xamssim)||null;
+    if(sim){
+      // simulated run (xams-sim): what was simulated, with the link to the simulation app
+      const tags=(run.raw_doc.tags||[]).filter(t=>typeof t==='string').join(', ');
+      $('runSummary').textContent=`Run: ${run.run_id}  (simulated, run.runs_mc)\nSimulation: ${sim.run_name||'-'}\nState: ${sim.state||'-'}   Detector: ${sim.detector||'-'}\nSource: ${sim.source||'-'} at ${(sim.source_position_mm||[]).join(', ')} mm\nDecays: ${sim.n_events||'-'}   Seed: ${sim.seed??'-'}\nRun key: ${sim.run_key||'-'}\nRun file: ${sim.run_file||'-'}\nTags: ${tags||'-'}\nMode: ${run.mode}\nStatus: ${ps.status||'unknown'}\nProcessing history entries: ${ph.length}\nDetails: simulation app (Simulations tile) → ${sim.run_name||''}`;
+      $('runJson').value=JSON.stringify(run.raw_doc||{},null,2);
+    }else{
     $('runSummary').textContent=`Run: ${run.run_id}\nScience Run: ${xbk.science_run_id||'-'}\nClass: ${xbk.run_class||'-'}\nSource: ${xbk.source_type||'-'}\nMode: ${run.mode}\nStart: ${fmt(run.start)}\nEnd: ${fmt(run.end)}\nStatus: ${ps.status||'unknown'} @ ${fmt(ps.time)}\nTags: ${(run.tags||[]).map(t=>t.name).join(', ')||'-'}\nComments: ${(run.comments||[]).length}\nProcessing history entries: ${ph.length}`;
     $('runJson').value=JSON.stringify(run.raw_doc||{},null,2);
+    }
   }else{
     $('runSummary').textContent=`Run: ${runId}\nDetails failed to load`;
     $('runJson').value='';
@@ -467,6 +476,7 @@ function init(){
   $('statusFilter').onchange=()=>{state.page=1;fetchRuns()};
   $('srFilter').onchange=()=>{state.page=1;fetchRuns()};
   $('runClassFilter').onchange=()=>{state.page=1;fetchRuns()};
+  $('kindFilter').onchange=()=>{state.page=1;state.selectedRun=null;fetchRuns()};
   $('sourceTypeFilter').oninput=onSource;
   $('runModeFilter').onchange=()=>{state.page=1;fetchRuns()};
   $('prevPage').onclick=()=>{state.page=Math.max(1,state.page-1);fetchRuns()};

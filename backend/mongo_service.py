@@ -28,12 +28,24 @@ class MongoService:
 
             self.client = amstrax.get_mongo_client()
             self.runs = amstrax.get_mongo_collection()
-            return
         except Exception:
-            pass
+            self.client = MongoClient(mongo_uri or settings.mongo_uri)
+            self.runs = self.client[settings.run_db][settings.run_collection]
+        self.runs_mc = self.runs.database[settings.mc_run_collection]
 
-        self.client = MongoClient(mongo_uri or settings.mongo_uri)
-        self.runs = self.client[settings.run_db][settings.run_collection]
+    # simulated runs (xams-sim): run numbers MC_RUNS, run documents in run.runs_mc (never in runs_gas)
+    MC_RUNS = (900000, 999999)
+
+    @classmethod
+    def is_mc(cls, run_id) -> bool:
+        try:
+            return cls.MC_RUNS[0] <= int(run_id) <= cls.MC_RUNS[1]
+        except (TypeError, ValueError):
+            return False
+
+    def collection_for(self, run_id):
+        """The collection with the run document of run_id: runs_mc for simulated runs, else runs_gas."""
+        return self.runs_mc if self.is_mc(run_id) else self.runs
 
     @staticmethod
     def _processing_status_value(ps: Any) -> str:
@@ -165,8 +177,14 @@ class MongoService:
         run_class: str = None,
         source_type: str = None,
         default_active_sr: bool = True,
+        kind: str = "data",
     ) -> tuple[list[RunSummary], int]:
         page = max(1, page)
+        mc = kind == "mc"
+        col = self.runs_mc if mc else self.runs
+        if mc:                                   # simulated runs carry no science-run bookkeeping
+            default_active_sr = False
+            science_run_id = run_class = source_type = None
         page_size = max(1, page_size)
         query: dict[str, Any] = {}
 
@@ -197,9 +215,13 @@ class MongoService:
             ]
             if q.isdigit():
                 ors.insert(0, {"number": int(q)})
+            if mc:
+                ors += [{"xamssim.state": {"$regex": q, "$options": "i"}},
+                        {"xamssim.source": {"$regex": q, "$options": "i"}},
+                        {"tags": {"$regex": q, "$options": "i"}}]
             query["$or"] = ors
 
-        total = self.runs.count_documents(query)
+        total = col.count_documents(query)
         # Backward-compat fallback: if active SR is set but legacy runs have no SR bookkeeping yet,
         # show runs instead of an empty table.
         if (
@@ -213,9 +235,9 @@ class MongoService:
             and not q
         ):
             query.pop("xams_bookkeeping.science_run_id", None)
-            total = self.runs.count_documents(query)
+            total = col.count_documents(query)
         cursor = (
-            self.runs.find(
+            col.find(
                 query,
                 {
                     "number": 1,
@@ -228,6 +250,11 @@ class MongoService:
                     "xams_bookkeeping.science_run_id": 1,
                     "xams_bookkeeping.run_class": 1,
                     "xams_bookkeeping.source_type": 1,
+                    "tags": 1,
+                    "xamssim.state": 1,
+                    "xamssim.source": 1,
+                    "xamssim.n_events": 1,
+                    "xamssim.run_name": 1,
                     "_id": 0,
                 },
             )
@@ -255,6 +282,9 @@ class MongoService:
                     run_class=xbk.get("run_class") or "",
                     source_type=xbk.get("source_type") or "",
                     corrections=self._event_corrections(doc),
+                    kind="mc" if mc else "data",
+                    mc=({**{k: (doc.get("xamssim") or {}).get(k) for k in ("state", "source", "n_events", "run_name")},
+                         "tags": [t for t in doc.get("tags", []) if isinstance(t, str)]} if mc else {}),
                 )
             )
         return out, int(total)
@@ -267,7 +297,7 @@ class MongoService:
         """
         from .deletion_service import KEEP_TYPES
 
-        result = self.runs.update_one(
+        result = self.collection_for(run_id).update_one(
             {"number": int(run_id)},
             {
                 "$pull": {"data": {"type": {"$nin": sorted(KEEP_TYPES)}}},
@@ -277,7 +307,7 @@ class MongoService:
         return {"matched": result.matched_count, "modified": result.modified_count}
 
     def get_run_doc(self, run_id: int) -> dict[str, Any] :
-        return self.runs.find_one({"number": int(run_id)}, {"_id": 0})
+        return self.collection_for(run_id).find_one({"number": int(run_id)}, {"_id": 0})
 
     def get_run_details(self, run_id: int) -> RunDetails :
         doc = self.get_run_doc(run_id)
@@ -323,7 +353,7 @@ class MongoService:
         payload.setdefault("host", "stbc-i1")
         payload.setdefault("action", "dashboard_submit")
         payload.setdefault("status", "unknown")
-        self.runs.update_one({"number": int(run_id)}, {"$push": {"processing_history": payload}})
+        self.collection_for(run_id).update_one({"number": int(run_id)}, {"$push": {"processing_history": payload}})
 
     def _infer_run_class(self, mode: str) -> str:
         m = (mode or "").lower()
