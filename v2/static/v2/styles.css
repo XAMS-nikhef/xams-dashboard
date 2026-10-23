@@ -52,7 +52,7 @@ button{
 }
 button:hover{filter:brightness(1.1)}
 
-.workspace{display:grid;grid-template-columns:1fr;gap:12px}
+.workspace{display:grid;grid-template-columns:minmax(0,1fr);gap:12px}
 .run-browser-panel{display:flex;flex-direction:column}
 .runs-table-wrap{max-height:460px}
 .content-panel{min-height:620px}
@@ -105,7 +105,7 @@ tr:hover{background:#162744}
   color:var(--muted);
 }
 
-.subgrid{display:grid;grid-template-columns:1fr 1.2fr;gap:10px}
+.subgrid{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1.2fr);gap:10px}
 .subpanel{
   border:1px solid #243555;
   border-radius:12px;
@@ -152,9 +152,10 @@ tr:hover{background:#162744}
 }
 
 .plot-controls{display:flex;gap:14px;align-items:center;color:var(--muted);font-size:13px;flex-wrap:wrap}
-.plots-grid{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+.plots-grid{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:10px}  /* minmax(0,..): columns never grow with the plots (re-drawn on every slider move) */
 .plot-block{grid-column:1 / -1}
 .plot{
+  min-width:0;
   height:360px;margin-top:8px;background:#0f1729;
   border:1px solid var(--line);border-radius:12px
 }

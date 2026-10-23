@@ -4,8 +4,45 @@ import time
 import math
 from typing import Any, Dict, Tuple
 
-_CACHE = {}  # type: Dict[int, Tuple[float, Dict[str, Any]]]
+_CACHE = {}  # type: Dict[Any, Tuple[float, Dict[str, Any]]]
 _CACHE_TTL = 60
+PROCESSED = "/data/xenon/xams_v2/xams_processed"
+MC_RAW, MC_PROCESSED = "/data/xenon/xams_v2/mc_raw_records", "/data/xenon/xams_v2/mc_processed"
+MC_RUNS = (900000, 999999)
+MC_CORRECTIONS = "MC1"
+
+
+def _versions(doc: Dict[str, Any]) -> list:
+    """Corrections versions with which event_info of the run is stored (data[] entries), newest first; 'online' =
+    stored without a version (the online / default context)."""
+    import re
+    found = []
+    for d in doc.get("data", []) or []:
+        if isinstance(d, dict) and d.get("type") == "event_info":
+            v = str(d.get("corrections_version") or "online")
+            if v not in found:
+                found.append(v)
+
+    def key(v):
+        m = re.match(r"^v(\d+)$", v)
+        return (2, int(m.group(1))) if m else ((0, 0) if v == "online" else (1, 0))
+    return sorted(found, key=key, reverse=True)
+
+
+def _event_context(amstrax, run_id: int, version):
+    """The amstrax context in which a run's stored event data are found: data runs with their corrections version
+    (None = online / default), simulated runs from the MC folders with their MC corrections (run document)."""
+    rid = "{:06d}".format(run_id)
+    if MC_RUNS[0] <= run_id <= MC_RUNS[1]:
+        import strax
+        st = amstrax.contexts.xams(output_folder=MC_PROCESSED, corrections_version=MC_CORRECTIONS)
+        st.storage = [strax.DataDirectory(MC_RAW, readonly=True, provide_run_metadata=True),
+                      strax.DataDirectory(MC_PROCESSED, readonly=True)] + st.storage
+        if MC_RAW not in amstrax.xams_config.RUNDOC_DIRS:
+            amstrax.xams_config.RUNDOC_DIRS.append(MC_RAW)
+        return amstrax.contexts.for_mc_run(st, rid)
+    kw = {} if version in (None, "online") else {"corrections_version": version}
+    return amstrax.contexts.xams(output_folder=PROCESSED, **kw)
 
 
 def _to_list(arr, names, field):
@@ -64,12 +101,14 @@ def load_event_features(
     max_points: int = 120000,
     max_peaks: int = 120000,
     max_waveforms: int = 40,
+    corrections: str | None = None,
 ) -> Dict[str, Any]:
     now = time.time()
     run_id = int(run_id)
+    cache_key = (run_id, corrections)
 
-    if run_id in _CACHE:
-        ts, payload = _CACHE[run_id]
+    if cache_key in _CACHE:
+        ts, payload = _CACHE[cache_key]
         if now - ts < _CACHE_TTL:
             return payload
 
@@ -96,13 +135,16 @@ def load_event_features(
         "led_amplitude_noise": [],
         "led_amplitude_diff": [],
         "reason": "",
+        "corrections_version": None,
+        "corrections_versions": [],
     }
 
     try:
         import amstrax  # type: ignore
 
         rid = "{:06d}".format(run_id)
-        run_doc = amstrax.get_mongo_collection().find_one({"number": run_id}, {"mode": 1, "xams_bookkeeping": 1, "tags": 1, "_id": 0}) or {}
+        run_doc = amstrax.get_run_collection(run_id).find_one(        # runs_mc for simulated runs, else runs_gas
+            {"number": run_id}, {"mode": 1, "xams_bookkeeping": 1, "tags": 1, "data": 1, "_id": 0}) or {}
         is_led = _is_led_run_doc(run_doc)
         payload["is_led_run"] = bool(is_led)
 
@@ -163,10 +205,22 @@ def load_event_features(
             except Exception:
                 pass
 
-            _CACHE[run_id] = (now, payload)
+            _CACHE[cache_key] = (now, payload)
             return payload
 
-        st = amstrax.contexts.xams(output_folder="/data/xenon/xams_v2/xams_processed")
+        # the context of the run's stored event data: the requested corrections version, else the newest stored one
+        versions = _versions(run_doc)
+        payload["corrections_versions"] = versions
+        tried = [corrections] if corrections else (versions or ["online"])
+        st, chosen = None, None
+        for v in tried:
+            st_v = _event_context(amstrax, run_id, v)
+            if st_v.is_stored(rid, "event_info") or st_v.is_stored(rid, "event_basics"):
+                st, chosen = st_v, v
+                break
+        if st is None:
+            st, chosen = _event_context(amstrax, run_id, tried[0]), tried[0]
+        payload["corrections_version"] = chosen
 
         data = {}
         for t in ("event_info", "event_basics", "event_positions", "events"):
@@ -187,11 +241,8 @@ def load_event_features(
                 if arr is None:
                     continue
                 names = set(arr.dtype.names)
-                if "drift_time" in names:
+                if "drift_time" in names:                       # (not endtime - time: that is the event window)
                     drift = arr["drift_time"].tolist()
-                    break
-                if "time" in names and "endtime" in names:
-                    drift = (arr["endtime"] - arr["time"]).tolist()
                     break
 
             # S1/S2: event_info or event_basics
@@ -244,8 +295,8 @@ def load_event_features(
             if not (x and y):
                 missing.append("XY")
 
-            payload["reason"] = "ok from {}{}".format(
-                ",".join(source),
+            payload["reason"] = "ok from {} (corrections {}){}".format(
+                ",".join(source), chosen,
                 ("; missing " + ", ".join(missing)) if missing else "",
             )
 
@@ -301,5 +352,5 @@ def load_event_features(
     except Exception as e:
         payload["reason"] = "{}".format(e)
 
-    _CACHE[run_id] = (now, payload)
+    _CACHE[cache_key] = (now, payload)
     return payload
