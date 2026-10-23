@@ -255,6 +255,7 @@ class MongoService:
                     "xamssim.source": 1,
                     "xamssim.n_events": 1,
                     "xamssim.run_name": 1,
+                    "xamssim.made": 1,
                     "_id": 0,
                 },
             )
@@ -272,7 +273,7 @@ class MongoService:
                 RunSummary(
                     number=int(doc["number"]),
                     mode=doc.get("mode"),
-                    start=doc.get("start"),
+                    start=(doc.get("xamssim") or {}).get("made") if mc else doc.get("start"),  # MC: when made
                     end=doc.get("end"),
                     processing_status=self._processing_status_value(ps),
                     has_raw_records=("raw_records" in dtypes),
