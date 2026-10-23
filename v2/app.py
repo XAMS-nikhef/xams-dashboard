@@ -243,7 +243,8 @@ def v2_plot_data(run_id: int):
     max_points = min(150000, max(5000, int(request.args.get('max_points', 80000))))
     max_peaks = min(400000, max(10000, int(request.args.get('max_peaks', 120000))))
     max_waveforms = min(200, max(1, int(request.args.get('max_waveforms', 40))))
-    return jsonify(load_event_features(run_id=run_id, max_points=max_points, max_peaks=max_peaks, max_waveforms=max_waveforms))
+    return jsonify(load_event_features(run_id=run_id, max_points=max_points, max_peaks=max_peaks, max_waveforms=max_waveforms,
+                                       corrections=request.args.get('corrections') or None))
 
 
 @app.get('/api/run/<int:run_id>/job-logs')
