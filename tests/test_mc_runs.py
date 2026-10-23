@@ -15,7 +15,8 @@ def _service():
     svc.runs.insert_one({"number": 7719, "mode": "Science_Rev2.4", "xams_bookkeeping": {"science_run_id": "SR-2026.2"}})
     svc.runs_mc.insert_one({"number": 900201, "mode": "simulation (sept)", "tags": ["simulation", "test"],
                             "xamssim": {"state": "sept", "source": "cs137_sept_standard", "n_events": 100000,
-                                        "run_name": "prod_test_cs137_std"}})
+                                        "run_name": "prod_test_cs137_std", "made": "2026-10-23T09:41:00"},
+                            "start": "1970-01-01T00:00:01"})
     return svc
 
 
@@ -30,6 +31,7 @@ def test_lists_data_and_mc_separately():
     mc, n = svc.get_runs_page(kind="mc", science_run_id="SR-2026.2")       # SR filter does not apply to MC
     assert n == 1 and mc[0].number == 900201 and mc[0].kind == "mc"
     assert mc[0].mc["state"] == "sept" and mc[0].mc["source"] == "cs137_sept_standard" and "test" in mc[0].mc["tags"]
+    assert mc[0].start == "2026-10-23T09:41:00"                            # MC: when made, not simulated time
     found, n = svc.get_runs_page(kind="mc", query_text="cs137")
     assert n == 1
 
