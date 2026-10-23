@@ -49,3 +49,42 @@ def test_helpers():
     assert sorted(["v10", "online", "v2", "dev"], key=L._version_key) == ["online", "v2", "v10", "dev"]
     assert L._reason(3, True, None, None, "abc").startswith("could not build")
     assert L._reason(3, False, "v4", "new", "old").startswith("not registered in the run DB")
+
+
+def test_scan_mc_run(tmp_path, monkeypatch):
+    """Simulated runs: their own folders (raw records, processed), latest and truth reconstruction."""
+    raw, proc = tmp_path / "mc_raw_records", tmp_path / "mc_processed"
+    raw.mkdir(); proc.mkdir()
+    make(raw, "900001-raw_records-y5oixg6qla")
+    make(proc, "900001-event_info-latest1")
+    make(proc, "900001-event_info-truth01")
+    make(tmp_path, "900001-event_info-elsewh")                  # not in the MC folders: not looked at
+    monkeypatch.setattr(L, "MC_RAW", str(raw))
+    monkeypatch.setattr(L, "MC_PROCESSED", str(proc))
+    monkeypatch.setattr(L, "_storage_locations", lambda: [str(tmp_path)])
+    monkeypatch.setattr(L, "_run_db_data_metadata", lambda run_id: {
+        ("raw_records", "y5oixg6qla"): {"db_corrections_version": "MC1"},
+        ("event_info", "latest1"): {"db_corrections_version": "MC1"},
+        ("event_info", "truth01"): {"db_corrections_version": "MC1"},
+    })
+    contexts = {"latest": {"raw_records": "y5oixg6qla", "event_info": "latest1"},
+                "truth": {"raw_records": "y5oixg6qla", "event_info": "truth01"}}
+
+    class Key:
+        def __init__(self, h):
+            self.lineage_hash = h
+
+    class St:
+        def __init__(self, use):
+            self.use = use
+
+        def key_for(self, run6, dtype):
+            return Key(contexts[self.use][dtype])
+
+        def is_stored(self, run6, dtype):
+            return True
+    monkeypatch.setattr(L, "_mc_context", lambda run6, use="latest": St(use))
+    rows = {r["dataset_dir"]: r for r in L.scan_disk_availability(900001)}
+    assert set(rows) == {"900001-raw_records-y5oixg6qla", "900001-event_info-latest1", "900001-event_info-truth01"}
+    assert all(r["loadable"] for r in rows.values())
+    assert rows["900001-event_info-truth01"]["reason"] == "OK: loadable with corrections MC1 (truth)"
