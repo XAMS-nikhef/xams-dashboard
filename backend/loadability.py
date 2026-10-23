@@ -49,6 +49,36 @@ def _storage_locations() -> List[str]:
     return unique
 
 
+# simulated runs (xams-sim, 900000-999999): their own folders, run documents in runs_mc, corrections MC1 with the run's
+# own values (amstrax for_mc_run: "latest", and "truth" as the kept reference)
+MC_RUNS = (900000, 999999)
+MC_RAW, MC_PROCESSED = "/data/xenon/xams_v2/mc_raw_records", "/data/xenon/xams_v2/mc_processed"
+MC_CORRECTIONS = "MC1"
+
+
+def _is_mc(run_id) -> bool:
+    return MC_RUNS[0] <= int(run_id) <= MC_RUNS[1]
+
+
+def _mc_context(run6: str, use: str = "latest"):
+    """amstrax context of a simulated run (cached for five minutes: a stored calibration changes its addresses)."""
+    key = ("mc", run6, use)
+    hit = _CTX_CACHE.get(key)
+    if hit and time.time() - hit[0] < 300:
+        return hit[1]
+    import amstrax  # type: ignore
+    import strax  # type: ignore
+
+    st = amstrax.contexts.xams(output_folder=MC_PROCESSED, corrections_version=MC_CORRECTIONS)
+    st.storage = [strax.DataDirectory(MC_RAW, readonly=True, provide_run_metadata=True),
+                  strax.DataDirectory(MC_PROCESSED, readonly=True)] + st.storage
+    if MC_RAW not in amstrax.xams_config.RUNDOC_DIRS:
+        amstrax.xams_config.RUNDOC_DIRS.append(MC_RAW)
+    st = amstrax.contexts.for_mc_run(st, run6, use=use)
+    _CTX_CACHE[key] = (time.time(), st)
+    return st
+
+
 def _parse_dataset_dirname(dirname: str) -> Dict[str, Any]:
     # expected shape: 007375-events-abcdefghij
     parts = dirname.split("-")
@@ -65,7 +95,7 @@ def _run_db_data_metadata(run_id: int) -> Dict[tuple[str, str], Dict[str, Any]]:
     try:
         import amstrax  # type: ignore
 
-        doc = amstrax.get_mongo_collection().find_one({"number": int(run_id)}, {"data": 1, "_id": 0}) or {}
+        doc = amstrax.get_run_collection(int(run_id)).find_one({"number": int(run_id)}, {"data": 1, "_id": 0}) or {}
         for e in doc.get("data", []):
             if not isinstance(e, dict):
                 continue
@@ -109,9 +139,13 @@ def _context(corrections_version=None, led=False):
 
 
 def _expected(run6: str, dtype: str, corrections_version=None):
-    """(lineage_hash, is_stored) of dtype for this run in the context of a corrections version."""
+    """(lineage_hash, is_stored) of dtype for this run in the context of a corrections version. Simulated runs: their
+    latest reconstruction for a recorded version, the truth one for None."""
     try:
-        st = _context(corrections_version, led=dtype in ("records_led", "led_calibration"))
+        if _is_mc(run6):
+            st = _mc_context(run6, "latest" if corrections_version else "truth")
+        else:
+            st = _context(corrections_version, led=dtype in ("records_led", "led_calibration"))
     except Exception:
         return None, False
     try:
@@ -192,7 +226,7 @@ def scan_disk_availability(run_id: int) -> List[Dict[str, Any]]:
             expected[k] = _expected(run6, dtype, version)
         return expected[k]
 
-    for base in _storage_locations():
+    for base in ([MC_RAW, MC_PROCESSED] if _is_mc(run_id) else _storage_locations()):
         if not os.path.isdir(base):
             continue
         try:
@@ -233,6 +267,8 @@ def scan_disk_availability(run_id: int) -> List[Dict[str, Any]]:
                 d_lineage, d_stored = _exp(meta["type"], None)
                 if d_lineage == meta["lineage_hash"]:
                     exp_lineage, stored, matched_version = d_lineage, d_stored, None
+                    if _is_mc(run_id):
+                        matched_version = "{} (truth)".format(version)
             loadable = bool(n_files > 0 and exp_lineage is not None and exp_lineage == meta["lineage_hash"])
             rows.append(
                 {
@@ -248,7 +284,7 @@ def scan_disk_availability(run_id: int) -> List[Dict[str, Any]]:
                     "reason": _reason(
                         n_files=n_files,
                         in_db=bool(md),
-                        version=matched_version,
+                        version=matched_version or ("{} (truth)".format(MC_CORRECTIONS) if _is_mc(run_id) else None),
                         expected=exp_lineage,
                         disk_lineage=meta["lineage_hash"],
                     ),
