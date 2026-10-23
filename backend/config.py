@@ -34,6 +34,8 @@ class Settings:
     )
     run_db: str = os.getenv("XAMS_RUN_DB", "run")
     run_collection: str = os.getenv("XAMS_RUN_COLLECTION", "runs_gas")
+    # simulated runs (xams-sim, numbers 900000-999999): their run documents, next to runs_gas in the same database
+    mc_run_collection: str = os.getenv("XAMS_MC_RUN_COLLECTION", "runs_mc")
     processing_db: str = os.getenv("XAMS_PROCESSING_DB", "daq")
     processing_collection: str = os.getenv("XAMS_PROCESSING_COLLECTION", "processing")
 

@@ -30,6 +30,9 @@ class RunSummary:
     source_type: str
     # corrections versions of the stored event_info entries ("online" = no version recorded)
     corrections: list[str] = field(default_factory=list)
+    # "data" or "mc" (simulated run, xams-sim: run.runs_mc); for mc the simulation summary (state, source, decays, tags)
+    kind: str = "data"
+    mc: dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass
