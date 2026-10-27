@@ -153,3 +153,10 @@ def test_bulk_outdated_by_run_age(view):
         == ["007720-peak_positions-oldoldoldo"]
     bp.view.rundocs = lambda runs: {r: {"start": _dt.datetime.now().isoformat()} for r in runs}   # a run of today
     assert c.post("/api/delete-outdated", json={"older_than_days": 30}).get_json()["delete"] == []
+
+
+def test_deleted_gone_from_list_at_once(view):
+    view.datasets_raw()
+    assert any(r["id"] == "007720-peak_positions-oldoldoldo" for r in view.rows())
+    view.delete(["007720-peak_positions-oldoldoldo"], confirm=True)
+    assert not any(r["id"] == "007720-peak_positions-oldoldoldo" for r in view.rows())     # no stale row

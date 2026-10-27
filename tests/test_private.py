@@ -219,8 +219,10 @@ def test_api_why(client, strax):
     client.get("/?token=secret-token")
     w = client.get(f"/api/dataset/{name}/why").get_json()
     assert w["status"] == "outdated" and w["why"]["providers"][0]["through"] == ["peak_positions"]
-    row = next(d for r in client.get("/api/runs").get_json()["runs"] for d in r["datasets"] if d["name"] == name)
-    assert "PeakPositions 1.2.26 → 2.1.0" in row["why_labels"]                  # shown in the chip tooltip
+    row = next(d for d in client.get("/api/run/7591").get_json()["datasets"] if d["name"] == name)
+    assert "PeakPositions 1.2.26 → 2.1.0" in row["why_labels"]                  # full rows in the run panel
+    slim = next(d for r in client.get("/api/runs").get_json()["runs"] for d in r["datasets"] if d["id"] == name)
+    assert set(slim) <= {"id", "dtype", "hash", "status", "current_for", "keep", "size", "raw", "temp"}   # list: slim
     cur = client.get("/api/dataset/007591-event_basics-aaaaaaaaaa/why").get_json()
     assert cur["status"] == "current" and cur["why"] is None
 

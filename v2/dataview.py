@@ -25,8 +25,11 @@ from backend.common.lineage import Lineage, provider_name
 from backend.common.profile import MC_RUNS, NEVER_TYPES, RAW_TYPES
 
 RUNDOC_TTL = 600
+ROWS_TTL = 15                     # seconds the data-set rows are reused (cleared by a scan, the status, keep, delete)
 JOBS_TTL = 20                     # seconds the condor / waiting-list state is reused
 SCAN_TTL = 60                     # seconds a folder scan is reused before a new one starts (in the background)
+# what the run list needs per data set (the run panel fetches the full rows with /api/run/<run>)
+LIST_FIELDS = ("id", "dtype", "hash", "status", "current_for", "keep", "size", "raw", "temp")
 PLOT_FIELDS = {
     "event": ["s1_area", "s2_area", "cs1", "cs2", "drift_time", "x", "y", "s1_area_fraction_top"],
     "peak": ["area", "area_fraction_top", "range_50p_area", "type"],
@@ -43,6 +46,8 @@ class DataView:
         self.lineage = Lineage(profile.state_dir, profile.providers)
         self._rundocs: dict = {}
         self._stored_lineage: dict = {}
+        self._why: dict = {}                     # (loc, name, mtime, lineage version) -> why()
+        self._rows: dict = {}                    # kind -> (key, time, rows)
         self._scan = (0.0, [])
         self._scan_lock = threading.Lock()
         self._scanning = False
@@ -148,6 +153,16 @@ class DataView:
 
     # -------------------------------------------------------------------------------------------- status
     def why(self, d) -> dict | None:
+        """What changed for an outdated data set (cached until the data set or the providers' hashes change)."""
+        ck = (d.loc, d.name, d.mtime, self.lineage.version)
+        if ck in self._why:
+            return self._why[ck]
+        res = self._why_compute(d)
+        if res is not None:
+            self._why[ck] = res
+        return res
+
+    def _why_compute(self, d) -> dict | None:
         cur = self.lineage.current_lineages(d)
         if not cur:
             return None
@@ -171,9 +186,25 @@ class DataView:
             return "live data are never deleted"
         return None
 
+    def _keep_mtime(self) -> float:
+        try:
+            return (self.p.state_dir / F.KEEP_FILE).stat().st_mtime
+        except OSError:
+            return 0.0
+
     def rows(self, kind: str | None = None) -> list:
+        """The data sets with status (cached ROWS_TTL s; a new scan, new hashes, keep marks or a deletion renew it)."""
         ds = self.datasets_raw()
         self.lineage.start(ds)                                   # compute what is missing (background, no-op if done)
+        key = (self._scan[0], self.lineage.version, self._keep_mtime(), len(ds))
+        hit = self._rows.get(kind)
+        if hit and hit[0] == key and time.time() - hit[1] < ROWS_TTL:
+            return hit[2]
+        out = self._rows_compute(ds, kind)
+        self._rows[kind] = (key, time.time(), out)
+        return out
+
+    def _rows_compute(self, ds, kind) -> list:
         keep = F.load_keep(self.p.state_dir)
         out = []
         for d in ds:
@@ -234,7 +265,11 @@ class DataView:
                                         "status": (status.get(d.id) or {}).get("status"), "note": note}) + "\n")
             except Exception as e:                               # noqa: BLE001
                 out["errors"].append({"name": d.id, "error": str(e)})
-        self._scan = (time.time() - SCAN_TTL - 1, self._scan[1])  # rescan in the background at the next request
+        # the list must not show deleted data sets again: drop them from the last scan at once (a full rescan follows
+        # in the background at the next request)
+        gone = set(out["deleted"])
+        self._scan = (time.time() - SCAN_TTL - 1, [x for x in self._scan[1] if x.id not in gone])
+        self._rows.clear()
         return out
 
 
@@ -273,10 +308,11 @@ def blueprint(profile, base: str = "") -> Blueprint:
         out = []
         for run in sorted(by_run, reverse=True):
             ds = by_run[run]
+            slim = [{k: d[k] for k in LIST_FIELDS if k in d} for d in ds]
             out.append({"run": run, "info": info.get(run, {}), "job": jobs.get(run, ""), "size": sum(d["size"] for d in ds),
                         "outdated_size": sum(d["size"] for d in ds if d["status"] in ("outdated", "incomplete")
                                              and not d["keep"]),
-                        "datasets": ds})
+                        "datasets": slim})
         return jsonify({"runs": out, "totals": _totals(rows), "lineage": view.lineage.state,
                         "scanning": not view._scan[0], "can_submit": bool(profile.submit),
                         "delete_statuses": sorted(profile.delete_statuses) if profile.delete_statuses else None})
@@ -287,6 +323,7 @@ def blueprint(profile, base: str = "") -> Blueprint:
         if not rows:
             return jsonify({"error": "no data sets of this run in the folders"}), 404
         return jsonify({"run": run, "info": view.rundocs([run]).get(run, {}), "datasets": rows,
+                        "size": sum(r["size"] for r in rows), "job": view.jobs().get(run, ""),
                         "provider_errors": {k: v.get(f"{run:06d}") for k, v in view.lineage.errors().items()
                                             if v.get(f"{run:06d}")}})
 
@@ -375,6 +412,7 @@ def blueprint(profile, base: str = "") -> Blueprint:
             F.set_keep(profile.state_dir, str(b.get("name", "")), bool(b.get("keep")), str(b.get("note") or "")[:200])
         except (ValueError, OSError) as e:
             return jsonify({"error": str(e)}), 400
+        view._rows.clear()
         return jsonify({"ok": True})
 
     @bp.post("/api/delete")
