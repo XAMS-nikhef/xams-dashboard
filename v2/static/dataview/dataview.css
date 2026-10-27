@@ -46,3 +46,10 @@ pre.json{font-size:10.5px;max-height:40vh;overflow:auto}
 #runDocBox summary{cursor:pointer;color:var(--accent)}
 .bulk-opts{display:inline-flex;gap:14px;align-items:center;padding:3px 8px;border:1px dashed var(--line);border-radius:8px}
 .nowrap{white-space:nowrap}
+/* blocks in the run list: full colours (the chips above use the dark variants) */
+.blk.st-current{background:#2ecc71;border-color:#2ecc71}
+.blk.st-outdated{background:#ff5c5c;border-color:#ff5c5c}
+.blk.st-incomplete{background:#f1c40f;border-color:#f1c40f}
+.blk.st-keep{background:#4db6ff;border-color:#4db6ff}
+.blk.st-unknown{background:#5b6b85;border-color:#5b6b85}
+.blk.st-pending{background:transparent;border:1px dashed #9fb4d8}
