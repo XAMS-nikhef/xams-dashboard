@@ -39,7 +39,8 @@ PY
             echo "token added to $SETTINGS"
         fi
         chmod 600 "$SETTINGS"
-        screen -S "$SCREEN_NAME" -dm bash -lc "cd '$APP_DIR' && $ENV_ACTIVATE && export XAMS_PRIVATE_SETTINGS='$SETTINGS' XAMS_CONFIG_FILE=~/.xams_config && exec python -m v2.private_app >> '$LOG' 2>&1"
+        touch "$LOG" && chmod 600 "$LOG"                   # only you: it lists your requests
+        screen -S "$SCREEN_NAME" -dm bash -lc "umask 077 && cd '$APP_DIR' && $ENV_ACTIVATE && export XAMS_PRIVATE_SETTINGS='$SETTINGS' XAMS_CONFIG_FILE=~/.xams_config && exec python -m v2.private_app >> '$LOG' 2>&1"
         sleep 5
         running && echo "started $SCREEN_NAME on 127.0.0.1:$PORT (log $LOG)" || { echo "failed to start; see $LOG"; exit 1; } ;;
     *)

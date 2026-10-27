@@ -8,11 +8,13 @@ and deletes only data-set folders inside the user's strax folder. Every request 
 from __future__ import annotations
 
 import hmac
+import logging
 import os
+import re
 import time
 from datetime import datetime
 
-from flask import Flask, abort, jsonify, make_response, render_template, request
+from flask import Flask, abort, jsonify, make_response, redirect, render_template, request
 
 from backend.private import folder as F
 from backend.private import stored
@@ -28,6 +30,19 @@ RUNDOC_TTL = 600
 
 
 # ------------------------------------------------------------------------------------------------ access
+class _HideToken(logging.Filter):
+    """The request log must not show the token (the log file may be readable by others)."""
+    def filter(self, record):
+        record.msg = re.sub(r"token=[^\s&\"]+", "token=***", str(record.msg))
+        if record.args:
+            record.args = tuple(re.sub(r"token=[^\s&\"]+", "token=***", a) if isinstance(a, str) else a
+                                for a in record.args)
+        return True
+
+
+logging.getLogger("werkzeug").addFilter(_HideToken())
+
+
 def _token_ok(value) -> bool:
     return bool(S.token) and bool(value) and hmac.compare_digest(str(value), S.token)
 
@@ -47,6 +62,13 @@ def _set_cookie(resp):
     if _token_ok(request.args.get("token")):
         resp.set_cookie(COOKIE, S.token, httponly=True, samesite="Strict", max_age=30 * 24 * 3600)
     return resp
+
+
+@app.before_request
+def _drop_token_from_url():
+    """A page opened with ?token=: the cookie is set, then the same page without the token in its address."""
+    if request.method == "GET" and request.path == "/" and request.args.get("token"):
+        return redirect("/", code=302)
 
 
 # ------------------------------------------------------------------------------------------------ helpers

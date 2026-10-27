@@ -129,9 +129,18 @@ def test_token_required(client):
     assert client.get("/api/runs?token=wrong").status_code == 403
     r = client.get("/api/runs?token=secret-token")
     assert r.status_code == 200 and "xams_private_token" in r.headers.get("Set-Cookie", "")
+    assert [x["run"] for x in r.get_json()["runs"]] == [7592, 7591]
     assert client.get("/api/runs").status_code == 200                       # cookie from now on
-    runs = r.get_json()["runs"]
-    assert [x["run"] for x in runs] == [7592, 7591]
+    r = client.get("/?token=secret-token")
+    assert r.status_code == 302 and r.headers["Location"].endswith("/")      # token out of the address
+
+
+def test_token_not_in_request_log(client):              # client: the app module with test settings
+    import logging
+    from v2.private_app import _HideToken
+    rec = logging.LogRecord("werkzeug", 20, "", 0, '%s - "%s" %s', ("127.0.0.1", "GET /?token=abc123&x=1 HTTP/1.1", 200), None)
+    _HideToken().filter(rec)
+    assert "abc123" not in rec.getMessage() and "token=***" in rec.getMessage()
 
 
 def test_api_delete_outdated_preview(client):
