@@ -44,8 +44,10 @@
         <button id="refreshBtn" title="compute the current hashes again (after changing gains or settings)">Recompute status</button>
         <button id="processBtn" disabled title="select runs in the list (production); private: later">Process (later)</button>
         <span class="spacer"></span>
-        <label class="hint">older than <input id="olderDays" type="number" min="0" value="0" class="num" /> days</label>
-        <label class="hint"><input id="inclIncomplete" type="checkbox" /> incl. incomplete</label>
+        <span class="bulk-opts" title="options of 'Delete all outdated…' (they do not filter the run list)">
+          <label class="hint">only written more than <input id="olderDays" type="number" min="0" value="0" class="num" /> days ago</label>
+          <label class="hint nowrap"><input id="inclIncomplete" type="checkbox" />&nbsp;also unfinished (_temp)</label>
+        </span>
         <button id="delOutdatedBtn" class="btn-danger" title="outdated data sets that are not kept; never raw records (those only one by one)">Delete all outdated…</button>
       </div>
       <div class="hint" id="lineageState"></div>

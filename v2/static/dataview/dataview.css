@@ -44,3 +44,5 @@ table.kv th{text-align:left;color:var(--muted);font-weight:normal;padding-right:
 pre.json{font-size:10.5px;max-height:40vh;overflow:auto}
 #runDocBox{margin:6px 0}
 #runDocBox summary{cursor:pointer;color:var(--accent)}
+.bulk-opts{display:inline-flex;gap:14px;align-items:center;padding:3px 8px;border:1px dashed var(--line);border-radius:8px}
+.nowrap{white-space:nowrap}
