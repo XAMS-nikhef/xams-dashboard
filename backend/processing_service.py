@@ -94,26 +94,27 @@ class ProcessingService:
     def list_corrections_versions(self) -> list[str]:
         versions: list[str] = []
         # Source of truth: GitHub repository content listing.
-        gh_url = (
-            "https://api.github.com/repos/XAMS-nikhef/amstrax_files/contents/"
-            "amstrax_files/corrections/_global"
-        )
-        try:
-            with urllib.request.urlopen(gh_url, timeout=10) as resp:
-                payload = json.loads(resp.read().decode("utf-8"))
-            if isinstance(payload, list):
-                for item in payload:
-                    if not isinstance(item, dict):
-                        continue
-                    fn = str(item.get("name", ""))
-                    m = re.match(r"^_global_(.+)\.json$", fn)
-                    if m:
-                        versions.append(m.group(1))
-        except Exception:
-            pass
+        # (the files are in corrections/_global; the old path amstrax_files/corrections/_global is kept as fallback)
+        for path in ("corrections/_global", "amstrax_files/corrections/_global"):
+            gh_url = "https://api.github.com/repos/XAMS-nikhef/amstrax_files/contents/" + path
+            try:
+                with urllib.request.urlopen(gh_url, timeout=10) as resp:
+                    payload = json.loads(resp.read().decode("utf-8"))
+                if isinstance(payload, list):
+                    for item in payload:
+                        if not isinstance(item, dict):
+                            continue
+                        fn = str(item.get("name", ""))
+                        m = re.match(r"^_global_(.+)\.json$", fn)
+                        if m:
+                            versions.append(m.group(1))
+            except Exception:
+                pass
+            if versions:
+                break
         # Fallback path: ask amstrax by probing common versions.
         if not versions:
-            probe = ["ONLINE", "v4", "v3", "v2", "v1", "v0", "dev"]
+            probe = ["ONLINE", "PROD0", "v5", "v4", "v3", "v2", "v1", "v0", "dev"]
             try:
                 import amstrax  # type: ignore
                 for v in probe:

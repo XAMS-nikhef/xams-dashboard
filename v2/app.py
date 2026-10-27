@@ -29,9 +29,10 @@ def _v3_submit(run_ids, targets, corrections_version) -> dict:
 
 
 def _v3_submit_options() -> dict:
-    return {'targets': DEFAULT_TARGETS, 'corrections_versions': processing.list_corrections_versions(),
-            'default_version': os.getenv('XAMS_AUTOPROC_CORRECTIONS', 'PROD0'), 'submit_mode': processing.submit_mode,
-            'max_jobs': processing.max_jobs}
+    default = os.getenv('XAMS_AUTOPROC_CORRECTIONS', 'PROD0')
+    versions = [v for v in processing.list_corrections_versions() if v != default]
+    return {'targets': DEFAULT_TARGETS, 'corrections_versions': [default] + versions,      # the default always first
+            'default_version': default, 'submit_mode': processing.submit_mode, 'max_jobs': processing.max_jobs}
 
 
 if os.getenv('XAMS_DASH_V3', '1') != '0':
