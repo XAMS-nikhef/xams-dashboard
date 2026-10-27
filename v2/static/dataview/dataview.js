@@ -253,7 +253,7 @@ async function loadRuns() {
     renderRuns();
     const sel = RUNS.find((r) => r.run === selectedRun);
     if (!sel) { selectedRun = null; $("dsTable").querySelector("tbody").innerHTML = ""; $("runInfo").textContent = ""; $("plots").innerHTML = ""; }
-    renderDetail(sel);
+    else loadDetail(selectedRun);
   } catch (e) { $("totals").textContent = "Error: " + e.message; }
 }
 
@@ -292,10 +292,24 @@ async function showWhy(d, tr) {
   } catch (e) { box.textContent = "Error: " + e.message; }
 }
 
+// the run panel: the full data-set rows of one run (the list itself only has what it shows)
+let DETAIL = null;
+async function loadDetail(run) {
+  try {
+    const d = await api(`/api/run/${run}`);
+    if (selectedRun !== run) return;
+    DETAIL = d;
+    renderDetail(d);
+  } catch (e) { $("runInfo").textContent = "Could not load the run: " + e.message; }
+}
+
 function selectRun(run) {
   selectedRun = run;
   renderRuns();
-  renderDetail(RUNS.find((r) => r.run === run));
+  const r = RUNS.find((x) => x.run === run);
+  $("detailTitle").textContent = `Run ${String(run).padStart(6, "0")} — loading…`;
+  $("dsTable").querySelector("tbody").innerHTML = "";
+  loadDetail(run);
   $("plots").innerHTML = ""; $("plotInfo").textContent = "";
   $("runDoc").innerHTML = "";
   loadRunDoc(run);

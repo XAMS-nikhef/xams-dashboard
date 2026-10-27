@@ -41,7 +41,21 @@ def _mtimes(paths) -> list:
     return out
 
 
+_FP: dict = {}                                # provider (json) -> (time, fingerprint)
+FP_TTL = 10.0                                 # seconds a fingerprint is reused (it stats the watched files)
+
+
 def fingerprint(provider: dict) -> str:
+    key = json.dumps(provider, sort_keys=True, default=str)
+    hit = _FP.get(key)
+    if hit and time.time() - hit[0] < FP_TTL:
+        return hit[1]
+    fp = _fingerprint(provider)
+    _FP[key] = (time.time(), fp)
+    return fp
+
+
+def _fingerprint(provider: dict) -> str:
     watch = list(provider.get("watch") or [])
     if provider.get("path"):
         watch.append(provider["path"])
@@ -62,6 +76,7 @@ class Lineage:
         self._lock = threading.Lock()
         self._thread = None
         self.state = {"running": False, "error": "", "done_at": None}
+        self.version = 0                      # changes whenever the cache changes (for caches built on it)
         self.cache = self._load()
 
     # cache: {fingerprint: {"name": ..., "hashes": {run6: {dtype: hash|null}}, "errors": {run6: msg},
@@ -73,6 +88,7 @@ class Lineage:
             return {}
 
     def _save(self):
+        self.version += 1
         self.folder.mkdir(parents=True, exist_ok=True)
         f = self.folder / CACHE_FILE
         tmp = f.with_suffix(".tmp")
@@ -120,6 +136,7 @@ class Lineage:
             if refresh:
                 fps = {fingerprint(p) for p in self.providers}
                 self.cache = {k: v for k, v in self.cache.items() if k not in fps}
+                self.version += 1
             todo = self._todo(datasets)
             if not todo and not self._lineage_todo(datasets):
                 return
