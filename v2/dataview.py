@@ -276,7 +276,7 @@ class DataView:
 def _totals(rows) -> dict:
     by = {}
     for r in rows:
-        k = "keep" if r["keep"] else r["status"]
+        k = "keep" if r["keep"] else ("rawold" if r["raw"] and r["status"] == "outdated" else r["status"])
         by[k] = by.get(k, 0) + r["size"]
     return {"size": sum(r["size"] for r in rows), "n_datasets": len(rows), "n_runs": len({r["run"] for r in rows}),
             "size_by_status": by}
