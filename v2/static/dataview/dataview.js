@@ -11,8 +11,12 @@ function gb(b) {
   return (b / 1e3).toFixed(0) + " kB";
 }
 function day(t) { return t ? String(t).slice(0, 16).replace("T", " ") : ""; }
-function stClass(d) { return d.keep ? "st-keep" : "st-" + d.status; }
+// outdated raw records (an older reader version) are grey, not red: they are never deleted in bulk and are rebuilt
+// from the live data when a run is reprocessed
+const rawOld = (d) => d.raw && d.status === "outdated" && !d.keep;
+function stClass(d) { return d.keep ? "st-keep" : (rawOld(d) ? "st-rawold" : "st-" + d.status); }
 function stLabel(d) {
+  if (rawOld(d)) return "old reader version (raw)";
   const s = d.keep ? "keep" : d.status;
   return d.status === "current" && d.current_for.length ? `${s} (${d.current_for.join(", ")})` : s;
 }
@@ -52,9 +56,9 @@ async function api(path, body) {
 
 function renderTotals(t, lin) {
   const by = t.size_by_status || {};
-  const part = (k) => by[k] ? `<span class="t chip ${"st-" + k}">${k} <b>${gb(by[k])}</b></span>` : "";
+  const part = (k) => by[k] ? `<span class="t chip ${"st-" + k}">${k === "rawold" ? "old raw" : k} <b>${gb(by[k])}</b></span>` : "";
   $("totals").innerHTML = `<span class="t">folder <b>${gb(t.size)}</b> · ${t.n_runs} runs · ${t.n_datasets} data sets</span>`
-    + ["current", "outdated", "incomplete", "unknown", "pending", "keep"].map(part).join("");
+    + ["current", "outdated", "incomplete", "unknown", "pending", "keep", "rawold"].map(part).join("");
   $("lineageState").textContent = lin.running ? "Computing the current hashes in the background (status 'pending' until done)…"
     : (lin.error ? "Status computation failed: " + lin.error : (lin.done_at ? "Status computed " + lin.done_at : ""));
   if (lin.running && !pollTimer) pollTimer = setInterval(loadRuns, 10000);
@@ -74,7 +78,7 @@ function runMatches(r) {
   const q = $("search").value.trim().toLowerCase();
   const f = $("statusFilter").value;
   if (f) {
-    const ok = r.datasets.some((d) => f === "keep" ? d.keep : (d.status === f && !d.keep));
+    const ok = r.datasets.some((d) => f === "keep" ? d.keep : (d.status === f && !d.keep && !rawOld(d)));
     if (!ok) return false;
   }
   if (!q) return true;

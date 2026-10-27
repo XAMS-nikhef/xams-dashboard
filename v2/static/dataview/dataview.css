@@ -95,3 +95,6 @@ button.primary{background:#2f7fd1;border-color:#4db6ff;color:#fff}
 .toast{padding:10px 14px;border-radius:10px;border:1px solid var(--line);background:#14213a;color:var(--text);font-size:13px;
   box-shadow:0 4px 14px rgba(0,0,0,.4)}
 .toast.ok{border-color:#2ecc71}.toast.warn{border-color:#f1c40f}.toast.bad{border-color:#ff6b6b}.toast.info{border-color:#4db6ff}
+/* outdated raw records (older reader version): grey, not red - never deleted in bulk */
+.st-rawold{background:#2a3446;border-color:#6b7a93;color:#c6d0e0}
+.blk.st-rawold{background:#8a96aa;border-color:#8a96aa}
