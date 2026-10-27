@@ -25,3 +25,13 @@
 dialog{background:var(--panel);color:var(--text);border:1px solid var(--line);border-radius:10px;max-width:760px;width:90%}
 dialog::backdrop{background:rgba(0,0,0,.6)}
 .small{font-size:11px;padding:2px 6px}
+.why-wrap{max-height:28vh;overflow:auto}
+#whyTable tbody tr{cursor:pointer}
+#whyTable tr.selected{background:#1b3354}
+.why-row td{background:#0d1526}
+.why-box{font-size:12px;line-height:1.5}
+.why-box .chg{margin:2px 0 6px 0}
+.why-box .opt{color:var(--muted);margin-left:14px}
+.why-box .old{color:#ffb3b3}
+.why-box .new{color:#bff5d4}
+.linkbtn{background:none;border:none;color:var(--accent);cursor:pointer;padding:0 4px;font-size:11px;text-decoration:underline}

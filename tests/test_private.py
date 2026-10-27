@@ -153,3 +153,74 @@ def test_api_delete_outdated_preview(client):
 def test_production_app_does_not_use_private_mode():
     src = (ROOT / "v2" / "app.py").read_text()
     assert "private" not in src
+
+
+# ------------------------------------------------------------------ what changed (plan 3.3)
+OLD = {"peaks": ["Peaks", "1.0", {"a": [3, 20]}],
+       "peak_positions": ["PeakPositions", "1.2.26", {"pos_rec_params": "file://pos_rec_params?filename=pos_rec_params_v0.json&x=1",
+                                                       "default_reconstruction_algorithm": "corr"}],
+       "event_basics": ["EventBasics", "1.6", {}]}
+NEW = {"peaks": ["Peaks", "1.0", {"a": (3, 20)}],                                   # tuple: no change
+       "peak_positions": ["PeakPositions", "2.1.0", {"pos_rec_map": "file://pos_rec_map?filename=pos_rec_map_v1.json"}],
+       "event_basics": ["EventBasics", "1.7", {}]}
+
+
+def test_diff_own_and_through():
+    from backend.private import whatchanged as W
+    d = W.diff(OLD, NEW, "event_basics")
+    assert d["own"] and d["through"] == ["peak_positions"]
+    pp = next(c for c in d["changes"] if c["dtype"] == "peak_positions")
+    assert pp["version"] == ["1.2.26", "2.1.0"]
+    assert pp["options"]["pos_rec_map"][0] is None and pp["options"]["default_reconstruction_algorithm"] == ["corr", None]
+    assert not any(c["dtype"] == "peaks" for c in d["changes"])
+    labs = W.labels(d)
+    assert "PeakPositions 1.2.26 → 2.1.0" in labs and "EventBasics 1.6 → 1.7" in labs
+    assert "PeakPositions: pos_rec_params pos_rec_params_v0.json → —" in labs
+    sub = lambda lin: {k: v for k, v in lin.items() if k != "event_basics"}        # the lineage of peak_positions
+    d2 = W.diff(sub(OLD), sub(NEW), "peak_positions")                              # same label for both data sets
+    assert "PeakPositions 1.2.26 → 2.1.0" in W.labels(d2) and not d2["through"]
+
+
+def test_diff_new_and_gone():
+    from backend.private import whatchanged as W
+    d = W.diff({"a": ["A", "1", {}]}, {"b": ["B", "2", {}]}, "b")
+    assert {c["kind"] for c in d["changes"]} == {"new", "gone"}
+
+
+def test_stored_lineage(strax):
+    from backend.private import whatchanged as W
+    name = "007591-event_basics-aaaaaaaaaa"
+    (strax / name / "event_basics-aaaaaaaaaa-metadata.json").write_text(json.dumps({"lineage": OLD}))
+    assert W.stored_lineage(strax, name) == OLD
+
+
+def test_worker_lineage_mode(tmp_path):
+    from backend.private.lineage import run_worker
+    (tmp_path / "prov.py").write_text(
+        "class K:\n    lineage_hash = 'h'\n    lineage = {'event_basics': ['EventBasics', '1.7', {'x': (1, 2)}]}\n"
+        "class St:\n    def key_for(self, run, t): return K()\n"
+        "def ctx(run): return St()\n")
+    res = run_worker({"kind": "function", "path": str(tmp_path / "prov.py"), "call": "ctx", "args": ["{run}"]},
+                     [["007591", ["event_basics"]]], want="lineage")
+    assert res["hashes"]["007591"]["event_basics"] == {"event_basics": ["EventBasics", "1.7", {"x": [1, 2]}]}
+
+
+def test_api_why_and_summary(client, strax):
+    from backend.private.lineage import fingerprint
+    import v2.private_app as A
+    name = "007591-event_basics-bbbbbbbbbb"
+    (strax / name / "event_basics-bbbbbbbbbb-metadata.json").write_text(json.dumps({"lineage": OLD}))
+    prov = {"name": "SR", "kind": "amstrax"}
+    A.lineage.providers = [prov]
+    A.lineage.cache = {fingerprint(prov): {"name": "SR", "errors": {},
+                                           "hashes": {"007591": {"event_basics": "aaaaaaaaaa", "peaks": None},
+                                                      "007592": {"peak_basics": None}},
+                                           "lineages": {"007591": {"event_basics": NEW}}}}
+    client.get("/?token=secret-token")
+    w = client.get(f"/api/dataset/{name}/why").get_json()
+    assert w["status"] == "outdated" and w["why"]["providers"][0]["through"] == ["peak_positions"]
+    j = client.get("/api/runs").get_json()
+    labs = {x["label"]: x for x in j["why_summary"]}
+    assert labs["PeakPositions 1.2.26 → 2.1.0"]["n"] == 1 and labs["PeakPositions 1.2.26 → 2.1.0"]["by_dtype"] == {"event_basics": 1}
+    cur = client.get("/api/dataset/007591-event_basics-aaaaaaaaaa/why").get_json()
+    assert cur["status"] == "current" and cur["why"] is None

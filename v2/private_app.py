@@ -18,6 +18,7 @@ from flask import Flask, abort, jsonify, make_response, redirect, render_templat
 
 from backend.private import folder as F
 from backend.private import stored
+from backend.private import whatchanged as W
 from backend.private.lineage import Lineage, provider_name
 from backend.private.settings import PrivateSettings
 
@@ -26,6 +27,7 @@ app = Flask(__name__, template_folder="templates", static_folder="static")
 lineage = Lineage(S.strax_folder, S.contexts)
 COOKIE = "xams_private_token"
 _RUNDOCS: dict = {}                     # run -> (time, summary of its run document)
+_STORED_LINEAGE: dict = {}              # data set name -> (mtime, lineage from its metadata)
 RUNDOC_TTL = 600
 
 
@@ -104,6 +106,26 @@ def _rundocs(runs) -> dict:
     return {r: _RUNDOCS[r][1] for r in runs}
 
 
+def _why(d) -> dict | None:
+    """What changed for an outdated data set: per provider that makes it, the diff of its stored lineage with the
+    current one (None while the current lineage is not computed yet)."""
+    cur = lineage.current_lineages(d)
+    if not cur:
+        return None
+    hit = _STORED_LINEAGE.get(d.name)
+    if not hit or hit[0] != d.mtime:
+        try:
+            hit = (d.mtime, W.stored_lineage(S.strax_folder, d.name))
+        except Exception as e:                               # noqa: BLE001
+            hit = (d.mtime, {"_error": str(e)[:200]})
+        _STORED_LINEAGE[d.name] = hit
+    out = []
+    for name, lin in cur:
+        dd = W.diff(hit[1], lin, d.dtype)
+        out.append({"provider": name, **dd, "labels": W.labels(dd)})
+    return {"providers": out, "labels": sorted({lab for x in out for lab in x["labels"]})}
+
+
 def _datasets():
     ds = F.scan(S.strax_folder)
     lineage.start(ds)                                        # compute what is missing (background, no-op if done)
@@ -112,8 +134,29 @@ def _datasets():
     for d in ds:
         row = F.as_dict(d)
         row.update(lineage.status(d), keep=d.name in keep, keep_note=(keep.get(d.name) or {}).get("note", ""))
+        if row["status"] == "outdated":
+            w = _why(d)
+            row["why_labels"], row["why_pending"] = (w["labels"], False) if w else ([], True)
         rows.append(row)
     return rows
+
+
+def _why_summary(rows) -> list:
+    """Over all outdated data sets that are not kept: per change, how many data sets (per data type) and how much."""
+    out: dict = {}
+    for r in rows:
+        if r["status"] != "outdated" or r["keep"]:
+            continue
+        for lab in r.get("why_labels") or ["(not computed yet)" if r.get("why_pending") else "(no difference found)"]:
+            e = out.setdefault(lab, {"label": lab, "n": 0, "size": 0, "by_dtype": {}, "runs": set()})
+            e["n"] += 1
+            e["size"] += r["size"]
+            e["by_dtype"][r["dtype"]] = e["by_dtype"].get(r["dtype"], 0) + 1
+            e["runs"].add(r["run"])
+    res = sorted(out.values(), key=lambda e: -e["size"])
+    for e in res:
+        e["n_runs"] = len(e.pop("runs"))
+    return res
 
 
 def _totals(rows) -> dict:
@@ -154,7 +197,7 @@ def runs():
                     "outdated_size": sum(d["size"] for d in ds if d["status"] in ("outdated", "incomplete")
                                          and not d["keep"]),
                     "datasets": ds})
-    return jsonify({"runs": out, "totals": _totals(rows), "lineage": lineage.state})
+    return jsonify({"runs": out, "totals": _totals(rows), "lineage": lineage.state, "why_summary": _why_summary(rows)})
 
 
 @app.get("/api/run/<int:run>")
@@ -165,6 +208,21 @@ def run_detail(run: int):
     return jsonify({"run": run, "info": _rundocs([run]).get(run, {}), "datasets": rows,
                     "provider_errors": {k: v.get(f"{run:06d}") for k, v in lineage.errors().items()
                                         if v.get(f"{run:06d}")}})
+
+
+@app.get("/api/dataset/<name>/why")
+def dataset_why(name: str):
+    """What changed for one data set (outdated): per provider the changes, old -> new."""
+    try:
+        F._target(S.strax_folder, name)
+    except ValueError as e:
+        return jsonify({"error": str(e)}), 400
+    d = next((x for x in F.scan(S.strax_folder) if x.name == name), None)
+    st = lineage.status(d)
+    if st["status"] != "outdated":
+        return jsonify({"name": name, "status": st["status"], "why": None})
+    w = _why(d)
+    return jsonify({"name": name, "status": "outdated", "pending": w is None, "why": w})
 
 
 @app.get("/api/dataset/<name>/meta")

@@ -9,7 +9,8 @@ Status of a data set:
     pending     not computed yet
 
 The hashes are computed in the background, one subprocess per provider (lineage_worker.py), and cached in the strax
-folder (.dashboard_lineage.json) per provider fingerprint: the provider's settings plus the modification times of its
+folder (.dashboard_lineage.json) per provider fingerprint; after them, for every outdated data set, the full current
+lineage of the providers that make it (for "what changed", whatchanged.py). Fingerprint: the provider's settings plus the modification times of its
 file and its "watch" paths (e.g. the analysis config folder with gains and processing settings). A change there makes
 the provider compute again; "refresh" forces it.
 """
@@ -63,7 +64,8 @@ class Lineage:
         self.state = {"running": False, "error": "", "done_at": None}
         self.cache = self._load()
 
-    # cache: {fingerprint: {"name": ..., "hashes": {run6: {dtype: hash|null}}, "errors": {run6: msg}}}
+    # cache: {fingerprint: {"name": ..., "hashes": {run6: {dtype: hash|null}}, "errors": {run6: msg},
+    #                       "lineages": {run6: {dtype: lineage}}}}   (lineages: only of outdated data sets)
     def _load(self) -> dict:
         try:
             return json.loads((self.folder / CACHE_FILE).read_text())
@@ -91,6 +93,24 @@ class Lineage:
                 out.append((i, fp, miss))
         return out
 
+    def _lineage_todo(self, datasets) -> list:
+        """[(provider index, fingerprint, {run6: [dtypes]})]: current lineages still missing for outdated data sets
+        (of every provider that makes the data type for the run)."""
+        out = {}
+        for d in datasets:
+            if self.status(d)["status"] != "outdated":
+                continue
+            run = f"{d.run:06d}"
+            for i, p in enumerate(self.providers):
+                fp = fingerprint(p)
+                entry = self.cache.get(fp) or {}
+                if (entry.get("hashes", {}).get(run) or {}).get(d.dtype) is None:
+                    continue
+                if d.dtype in (entry.get("lineages", {}).get(run) or {}):
+                    continue
+                out.setdefault((i, fp), {}).setdefault(run, set()).add(d.dtype)
+        return [(i, fp, {r: sorted(t) for r, t in m.items()}) for (i, fp), m in out.items()]
+
     def start(self, datasets, refresh: bool = False):
         """Compute what is missing (all again with refresh), in a background thread."""
         with self._lock:
@@ -100,32 +120,59 @@ class Lineage:
                 fps = {fingerprint(p) for p in self.providers}
                 self.cache = {k: v for k, v in self.cache.items() if k not in fps}
             todo = self._todo(datasets)
-            if not todo:
+            if not todo and not self._lineage_todo(datasets):
                 return
             self.state.update(running=True, error="")
-            self._thread = threading.Thread(target=self._run, args=(todo,), daemon=True)
+            self._thread = threading.Thread(target=self._run, args=(todo, list(datasets)), daemon=True)
             self._thread.start()
 
-    def _run(self, todo):
+    def _run(self, todo, datasets=()):
         try:
-            for i, fp, miss in todo:
-                p = self.providers[i]
-                entry = self.cache.setdefault(fp, {"name": provider_name(p, i), "hashes": {}, "errors": {}})
-                items = sorted(miss.items())
-                for k in range(0, len(items), BATCH):
-                    res = run_worker(p, items[k:k + BATCH])
-                    if res.get("fatal"):
-                        raise RuntimeError(f"{provider_name(p, i)}: {res['fatal']}")
-                    for r, h in res.get("hashes", {}).items():
-                        entry["hashes"].setdefault(r, {}).update(h)
-                    entry["errors"].update(res.get("errors", {}))
-                    with self._lock:
-                        self._save()
+            self._hashes(todo)
+            self._lineages(self._lineage_todo(datasets))
             self.state["done_at"] = time.strftime("%Y-%m-%d %H:%M:%S")
         except Exception as e:                               # noqa: BLE001
             self.state["error"] = str(e)[:500]
         finally:
             self.state["running"] = False
+
+    def _lineages(self, todo):
+        for i, fp, miss in todo:
+            p = self.providers[i]
+            entry = self.cache.setdefault(fp, {"name": provider_name(p, i), "hashes": {}, "errors": {}})
+            items = sorted(miss.items())
+            for k in range(0, len(items), BATCH):
+                res = run_worker(p, items[k:k + BATCH], want="lineage")
+                if res.get("fatal"):
+                    raise RuntimeError(f"{provider_name(p, i)}: {res['fatal']}")
+                for r, h in res.get("hashes", {}).items():
+                    entry.setdefault("lineages", {}).setdefault(r, {}).update({t: v for t, v in h.items() if v})
+                with self._lock:
+                    self._save()
+
+    def current_lineages(self, d) -> list:
+        """[(provider name, current lineage)] of the providers that make data set d's type for its run."""
+        run, out = f"{d.run:06d}", []
+        for i, p in enumerate(self.providers):
+            lin = ((self.cache.get(fingerprint(p)) or {}).get("lineages", {}).get(run) or {}).get(d.dtype)
+            if lin:
+                out.append((provider_name(p, i), lin))
+        return out
+
+    def _hashes(self, todo):
+        for i, fp, miss in todo:
+            p = self.providers[i]
+            entry = self.cache.setdefault(fp, {"name": provider_name(p, i), "hashes": {}, "errors": {}})
+            items = sorted(miss.items())
+            for k in range(0, len(items), BATCH):
+                res = run_worker(p, items[k:k + BATCH])
+                if res.get("fatal"):
+                    raise RuntimeError(f"{provider_name(p, i)}: {res['fatal']}")
+                for r, h in res.get("hashes", {}).items():
+                    entry["hashes"].setdefault(r, {}).update(h)
+                entry["errors"].update(res.get("errors", {}))
+                with self._lock:
+                    self._save()
 
     def status(self, d) -> dict:
         """Status of one data set (module doc) and the providers that make it now."""
@@ -157,12 +204,13 @@ class Lineage:
         return out
 
 
-def run_worker(provider: dict, items: list, timeout: int = 3600) -> dict:
-    """One worker call: lineage hashes of `items` [(run6, [dtypes])] for one provider, in its own python."""
+def run_worker(provider: dict, items: list, timeout: int = 3600, want: str = "hash") -> dict:
+    """One worker call: lineage hashes (want "lineage": full lineages) of `items` [(run6, [dtypes])] for one provider,
+    in its own python."""
     py = provider.get("python") or sys.executable
     env = dict(os.environ)
     env.pop("PYTHONPATH", None)                              # the provider's python, not the dashboard's paths
-    r = subprocess.run([py, str(WORKER)], input=json.dumps({"provider": provider, "items": items}),
+    r = subprocess.run([py, str(WORKER)], input=json.dumps({"provider": provider, "items": items, "want": want}),
                        capture_output=True, text=True, timeout=timeout, env=env)
     lines = [ln for ln in r.stdout.splitlines() if ln.startswith("{")]
     if r.returncode != 0 or not lines:
