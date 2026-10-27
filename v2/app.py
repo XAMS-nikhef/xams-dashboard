@@ -17,10 +17,29 @@ app = Flask(__name__, template_folder='templates', static_folder='static')
 
 # The new data view (docs/UNIFIED_DASHBOARD_REPORT.md) on trial at /v3, next to this page; XAMS_DASH_V3=0 switches it
 # off. Shared with the private dashboard (v2/dataview.py, profile "production").
+def _v3_jobs() -> dict:
+    """Condor job state (or 'queued' on the waiting list) per run, for the /v3 run list."""
+    out = {r: s for r, s in mongo.get_condor_runs().items() if r is not None and s}
+    out.update({r: 'queued' for r in submit_queue.queued_run_ids()})
+    return out
+
+
+def _v3_submit(run_ids, targets, corrections_version) -> dict:
+    return submit_runs([int(r) for r in run_ids], targets or DEFAULT_TARGETS, corrections_version or None)
+
+
+def _v3_submit_options() -> dict:
+    return {'targets': DEFAULT_TARGETS, 'corrections_versions': processing.list_corrections_versions(),
+            'default_version': os.getenv('XAMS_AUTOPROC_CORRECTIONS', 'PROD0'), 'submit_mode': processing.submit_mode,
+            'max_jobs': processing.max_jobs}
+
+
 if os.getenv('XAMS_DASH_V3', '1') != '0':
     from backend.common.profile import production_profile
     from v2.dataview import blueprint as _dataview
-    app.register_blueprint(_dataview(production_profile(), base='/v3'), url_prefix='/v3')
+    _v3_profile = production_profile()
+    _v3_profile.submit, _v3_profile.submit_options, _v3_profile.jobs = _v3_submit, _v3_submit_options, _v3_jobs
+    app.register_blueprint(_dataview(_v3_profile, base='/v3'), url_prefix='/v3')
 
 mongo = MongoService()
 processing = ProcessingService()
@@ -389,14 +408,25 @@ def _prepare_request(run_id, requested_targets, corrections_version, amstrax_ref
 @app.post('/api/v2/submit')
 def v2_submit():
     body = request.get_json(force=True, silent=True) or {}
-    run_ids = body.get('run_ids') or []
-    requested_targets = body.get('targets') or ['peak_basics', 'event_basics', 'event_positions', 'event_info']
-    corrections_version = (body.get('corrections_version') or '').strip() or None
-    amstrax_ref = (body.get('amstrax_ref') or '').strip() or None
-    resource_profile = (body.get('resource_profile') or '8gb').strip() or '8gb'
+    return jsonify(submit_runs(
+        body.get('run_ids') or [],
+        body.get('targets') or DEFAULT_TARGETS,
+        (body.get('corrections_version') or '').strip() or None,
+        (body.get('amstrax_ref') or '').strip() or None,
+        (body.get('resource_profile') or '8gb').strip() or '8gb',
+        queue_only=bool(body.get('queue_only')),
+    ))
+
+
+DEFAULT_TARGETS = ['peak_basics', 'event_basics', 'event_positions', 'event_info']
+
+
+def submit_runs(run_ids, requested_targets, corrections_version=None, amstrax_ref=None, resource_profile='8gb',
+                queue_only=False) -> dict:
+    """Submit (or put on the waiting list) the processing of runs: the old page's Submit and the /v3 page."""
     out = []
     # queue_only: the caller already hit the job limit, put runs straight on the waiting list
-    busy = bool(body.get('queue_only'))
+    busy = bool(queue_only)
     for rid in run_ids:
         run_id = int(rid)
         try:
@@ -424,7 +454,7 @@ def v2_submit():
     counts = {}
     for x in out:
         counts[x.get('status', 'failed')] = counts.get(x.get('status', 'failed'), 0) + 1
-    return jsonify({
+    return {
         'submitted': counts.get('submitted', 0),
         'queued': counts.get('queued', 0),
         'skipped': counts.get('skipped', 0),
@@ -434,7 +464,7 @@ def v2_submit():
         'submit_mode': processing.submit_mode,
         'max_jobs': processing.max_jobs,
         'results': _json_safe(out),
-    })
+    }
 
 
 @app.get('/api/queue')

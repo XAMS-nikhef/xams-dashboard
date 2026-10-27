@@ -7,7 +7,7 @@
 .totals .t b{font-size:16px}
 .spacer{flex:1}
 .num{width:60px}
-.private-grid{display:grid;grid-template-columns:minmax(420px,5fr) 7fr;gap:12px;margin:12px 0}
+.private-grid{display:grid;grid-template-columns:minmax(640px,7fr) 6fr;gap:12px;margin:12px 0}
 @media (max-width:1100px){.private-grid{grid-template-columns:1fr}}
 .runs-wrap{max-height:70vh;overflow:auto}
 .del-wrap{max-height:30vh;overflow:auto}
@@ -32,3 +32,24 @@ dialog::backdrop{background:rgba(0,0,0,.6)}
 .why-box .old{color:#ffb3b3}
 .why-box .new{color:#bff5d4}
 .linkbtn{background:none;border:none;color:var(--accent);cursor:pointer;padding:0 4px;font-size:11px;text-decoration:underline}
+.tcol{writing-mode:vertical-rl;transform:rotate(180deg);font-size:10px;font-weight:normal;padding:4px 2px;white-space:nowrap}
+.blkcell{text-align:center;padding:2px}
+.blk{display:inline-block;width:13px;height:13px;border-radius:3px;border:1px solid var(--line);vertical-align:middle}
+.run-doc{font-size:12px;max-height:60vh;overflow:auto}
+.run-doc h4{margin:10px 0 4px 0;color:var(--muted)}
+.doc-grid{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+@media (max-width:900px){.doc-grid{grid-template-columns:1fr}}
+table.kv{font-size:11px}
+table.kv th{text-align:left;color:var(--muted);font-weight:normal;padding-right:8px}
+pre.json{font-size:10.5px;max-height:40vh;overflow:auto}
+#runDocBox{margin:6px 0}
+#runDocBox summary{cursor:pointer;color:var(--accent)}
+.bulk-opts{display:inline-flex;gap:14px;align-items:center;padding:3px 8px;border:1px dashed var(--line);border-radius:8px}
+.nowrap{white-space:nowrap}
+/* blocks in the run list: full colours (the chips above use the dark variants) */
+.blk.st-current{background:#2ecc71;border-color:#2ecc71}
+.blk.st-outdated{background:#ff5c5c;border-color:#ff5c5c}
+.blk.st-incomplete{background:#f1c40f;border-color:#f1c40f}
+.blk.st-keep{background:#4db6ff;border-color:#4db6ff}
+.blk.st-unknown{background:#5b6b85;border-color:#5b6b85}
+.blk.st-pending{background:transparent;border:1px dashed #9fb4d8}

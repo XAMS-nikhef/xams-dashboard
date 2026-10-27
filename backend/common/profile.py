@@ -40,6 +40,10 @@ class Profile:
     on_delete: Callable | None = None                 # (dataset, location) -> note, after a data set is deleted
     links: list = field(default_factory=list)         # [(label, url)] in the page header
     min_run: int = 0                                  # runs below it are not shown
+    # processing (set by the app that hosts the page; None: no Process button)
+    submit: Callable | None = None                    # (run_ids, targets, corrections_version) -> result dict
+    submit_options: Callable | None = None            # () -> {targets, corrections_versions, default_version, ...}
+    jobs: Callable | None = None                      # () -> {run: job state} (condor / waiting list)
 
 
 def private_profile(settings) -> Profile:

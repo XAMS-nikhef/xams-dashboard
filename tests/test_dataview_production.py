@@ -100,3 +100,38 @@ def test_bulk_outdated_never_raw(view, tmp_path):
     app.register_blueprint(bp)
     pv = app.test_client().post("/api/delete-outdated", json={"incomplete": True}).get_json()
     assert [x["name"] for x in pv["delete"]] == ["007720-peak_positions-oldoldoldo"]      # raw and kept left out
+
+
+def _client(view, **hooks):
+    from flask import Flask
+    from v2 import dataview as DV
+    for k, v in hooks.items():
+        setattr(view.p, k, v)
+    bp = DV.blueprint(view.p, base="")
+    bp.view.lineage = view.lineage
+    bp.view.rundocs = lambda runs: {r: {"processing": "done"} for r in runs}
+    app = Flask("t", template_folder=str(Path(DV.__file__).parent / "templates"))
+    app.register_blueprint(bp)
+    return app.test_client()
+
+
+def test_submit_through_host_app(view):
+    calls = []
+    c = _client(view, submit=lambda ids, t, v: calls.append((ids, t, v)) or {"submitted": len(ids), "results": []},
+                submit_options=lambda: {"targets": ["event_info"], "corrections_versions": ["PROD0", "v4"],
+                                        "default_version": "PROD0"},
+                jobs=lambda: {7720: "running"})
+    j = c.get("/api/runs").get_json()
+    assert j["can_submit"] and next(r for r in j["runs"] if r["run"] == 7720)["job"] == "running"
+    o = c.get("/api/submit-options").get_json()
+    assert o["enabled"] and o["default_version"] == "PROD0"
+    r = c.post("/api/submit", json={"run_ids": [7720], "targets": ["event_info"], "corrections_version": "v4"}).get_json()
+    assert r["submitted"] == 1 and calls == [([7720], ["event_info"], "v4")]
+    assert c.post("/api/submit", json={"run_ids": []}).status_code == 400
+
+
+def test_no_submit_without_host(view):
+    c = _client(view)
+    assert c.get("/api/submit-options").get_json() == {"enabled": False}
+    assert c.post("/api/submit", json={"run_ids": [7720]}).status_code == 404
+    assert not c.get("/api/runs").get_json()["can_submit"]
