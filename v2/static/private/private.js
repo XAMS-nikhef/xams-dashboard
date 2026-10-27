@@ -2,7 +2,7 @@
 const $ = (id) => document.getElementById(id);
 const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({"&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;"}[c]));
 const STATUS_ORDER = ["current", "outdated", "incomplete", "unknown", "pending"];
-let RUNS = [], selectedRun = null, pollTimer = null, whyFilter = null, WHY = [];
+let RUNS = [], selectedRun = null, pollTimer = null;
 let KIND = location.hash === "#mc" ? "mc" : "data";      // the tab: data runs or simulated runs (900000-999999)
 
 function gb(b) {
@@ -37,7 +37,6 @@ function renderTotals(t, lin) {
 }
 
 function runMatches(r) {
-  if (whyFilter && !r.datasets.some((d) => !d.keep && (d.why_labels || []).includes(whyFilter))) return false;
   const q = $("search").value.trim().toLowerCase();
   const f = $("statusFilter").value;
   if (f) {
@@ -80,33 +79,12 @@ async function loadRuns() {
   try {
     const j = await api("/api/runs?kind=" + KIND);
     RUNS = j.runs;
-    WHY = j.why_summary || [];
     renderTotals(j.totals, j.lineage);
-    renderWhy();
     renderRuns();
     const sel = RUNS.find((r) => r.run === selectedRun);
     if (!sel) { selectedRun = null; $("dsTable").querySelector("tbody").innerHTML = ""; $("runInfo").textContent = ""; $("plots").innerHTML = ""; }
     renderDetail(sel);
   } catch (e) { $("totals").textContent = "Error: " + e.message; }
-}
-
-// ------------------------------------------------------------------ why outdated: summary over the folder
-function renderWhy() {
-  const tb = $("whyTable").querySelector("tbody");
-  if (whyFilter && !WHY.some((w) => w.label === whyFilter)) whyFilter = null;
-  tb.innerHTML = WHY.length ? "" : `<tr><td colspan="4" class="hint">nothing outdated</td></tr>`;
-  for (const w of WHY) {
-    const tr = document.createElement("tr");
-    if (w.label === whyFilter) tr.className = "selected";
-    const by = Object.entries(w.by_dtype).map(([t, n]) => `${esc(t)} ${n}`).join(", ");
-    tr.innerHTML = `<td>${esc(w.label)}</td><td>${w.n} <span class="hint">(${by})</span></td><td>${w.n_runs}</td><td>${gb(w.size)}</td>`;
-    tr.onclick = () => { whyFilter = whyFilter === w.label ? null : w.label; renderWhy(); renderRuns(); };
-    tb.appendChild(tr);
-  }
-  $("whyFilterInfo").innerHTML = whyFilter
-    ? ` — showing runs with: <b>${esc(whyFilter)}</b> <button class="linkbtn" id="whyClear">show all</button>` : "";
-  const c = $("whyClear");
-  if (c) c.onclick = (e) => { e.stopPropagation(); whyFilter = null; renderWhy(); renderRuns(); };
 }
 
 // one data set: the changes, old -> new, per provider that makes it
@@ -302,7 +280,6 @@ async function plotDataset(d) {
 function setKind(k) {
   KIND = k;
   document.querySelectorAll(".nav-link[data-kind]").forEach((a) => a.classList.toggle("active", a.dataset.kind === k));
-  whyFilter = null;
   loadRuns();
 }
 document.querySelectorAll(".nav-link[data-kind]").forEach((a) => (a.onclick = (e) => { e.preventDefault(); history.replaceState(null, "", "#" + a.dataset.kind); setKind(a.dataset.kind); }));

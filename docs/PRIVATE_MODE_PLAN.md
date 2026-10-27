@@ -67,9 +67,8 @@ type).lineage`, in the provider's own process like the hashes):
   also through its own plugin;
 - values compared after JSON normalisation (lists vs tuples are no change).
 
-Shown in the run's data-set table (a "why?" next to the status) and as a summary over all outdated data sets ("312
-data sets outdated: PeakPositions 1.2.26 → 2.1.0 / pos_rec_map; 40: gain_to_pe_array gains_v2 → v3"), so one
-reason can be handled for many runs at once. Cached with the hashes (same fingerprint).
+Shown in the run's data-set table (a "why?" next to the status) and in the tooltips of the run list. (A summary
+panel over the folder was tried and dropped, 2026-10-27.) Cached with the hashes (same fingerprint).
 
 Example (run 7720, SR2026.2, checked by hand 2026-10-27): `peaks`, `peak_basics`, `events` current; `peak_positions`
 outdated (PeakPositions 1.2.26 → 2.1.0: correlation method with `pos_rec_params_v0` → `pos_rec_map_v1`);
@@ -140,7 +139,7 @@ everything goes through the tile.
    production mode unchanged.
 2. **MC tab:** private MC run documents from files, MC folders from the settings.
 3. **Launcher:** Settings tile, start / restart, `install_private.sh`, `start_private.sh`; per-user ports.
-4. **What changed** (3.3): per data set and as a summary over the folder.
+4. **What changed** (3.3): per data set (built, #16).
 5. **Handbook:** page "Private dashboard and simulations for your own account".
 6. **Process button** (3.4, private condor jobs), after 3.3.
 

@@ -149,24 +149,6 @@ def _datasets(kind: str | None = None):
     return [r for r in rows if _kind_ok(r["run"], kind)]
 
 
-def _why_summary(rows) -> list:
-    """Over all outdated data sets that are not kept: per change, how many data sets (per data type) and how much."""
-    out: dict = {}
-    for r in rows:
-        if r["status"] != "outdated" or r["keep"]:
-            continue
-        for lab in r.get("why_labels") or ["(not computed yet)" if r.get("why_pending") else "(no difference found)"]:
-            e = out.setdefault(lab, {"label": lab, "n": 0, "size": 0, "by_dtype": {}, "runs": set()})
-            e["n"] += 1
-            e["size"] += r["size"]
-            e["by_dtype"][r["dtype"]] = e["by_dtype"].get(r["dtype"], 0) + 1
-            e["runs"].add(r["run"])
-    res = sorted(out.values(), key=lambda e: -e["size"])
-    for e in res:
-        e["n_runs"] = len(e.pop("runs"))
-    return res
-
-
 def _totals(rows) -> dict:
     by = {}
     for r in rows:
@@ -193,7 +175,7 @@ def overview():
 
 @app.get("/api/runs")
 def runs():
-    """?kind=data (runs below 900000) or mc (simulated runs 900000-999999); totals and summary for that kind."""
+    """?kind=data (runs below 900000) or mc (simulated runs 900000-999999); totals for that kind."""
     rows = _datasets(request.args.get("kind"))
     by_run: dict = {}
     for r in rows:
@@ -206,7 +188,7 @@ def runs():
                     "outdated_size": sum(d["size"] for d in ds if d["status"] in ("outdated", "incomplete")
                                          and not d["keep"]),
                     "datasets": ds})
-    return jsonify({"runs": out, "totals": _totals(rows), "lineage": lineage.state, "why_summary": _why_summary(rows)})
+    return jsonify({"runs": out, "totals": _totals(rows), "lineage": lineage.state})
 
 
 @app.get("/api/run/<int:run>")
