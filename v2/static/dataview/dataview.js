@@ -164,13 +164,15 @@ function num(v) {
 }
 
 function scTable(snap) {
+  // one row per quantity: value at the start and at the end of the run
   if (!snap) return "<p class='hint'>no slow-control snapshot</p>";
-  return ["start", "end"].filter((k) => snap[k]).map((k) => {
-    const v = snap[k].values || {};
-    return `<div><b>${k}</b> <span class="hint">${esc(snap[k].time || "")}</span><table class="kv">`
-      + Object.entries(v).map(([n, x]) => `<tr><th>${esc(n)}</th><td>${esc(num(x && x.value))} ${esc(x && x.unit || "")}${x && x.quality !== "ok" ? ` <span class="warn">${esc(x.quality)}</span>` : ""}</td></tr>`).join("")
-      + "</table></div>";
-  }).join("");
+  const st = (snap.start || {}).values || {}, en = (snap.end || {}).values || {};
+  const names = [...new Set([...Object.keys(st), ...Object.keys(en)])];
+  const cell = (x) => !x ? "<td class='hint'>—</td>"
+    : `<td>${esc(num(x.value))} ${esc(x.unit || "")}${x.quality !== "ok" ? ` <span class="warn">${esc(x.quality)}</span>` : ""}</td>`;
+  return `<table class="kv"><tr><th></th><th>start <span class="hint">${esc((snap.start || {}).time || "")}</span></th>`
+    + `<th>end <span class="hint">${esc((snap.end || {}).time || "")}</span></th></tr>`
+    + names.map((n) => `<tr><th>${esc(n)}</th>${cell(st[n])}${cell(en[n])}</tr>`).join("") + "</table>";
 }
 
 async function loadRunDoc(run) {
