@@ -1,7 +1,9 @@
-"""One-page note: how the configuration of the private dashboard works — from the launcher tile via the settings file
-to the analysis code that defines the context, and how a data set gets its status (current / outdated / unknown).
+"""Two-page note: how the configuration works. Page 1, private: from the launcher tile via the settings file to the
+analysis code that defines the context, and how a data set gets its status (current / outdated / unknown). Page 2,
+production: what starts the processing, where the corrections versions come from, what is written where, and how the
+production dashboard judges it.
 House style of the XAMS notes (reportlab).
-Usage (any python with reportlab): python docs/notes/make_private_config_note.py [docs/notes/XAMS_private_config.pdf]"""
+Usage (any python with reportlab): python docs/notes/make_processing_config_note.py [docs/notes/XAMS_processing_config.pdf]"""
 import sys
 from pathlib import Path
 
@@ -13,7 +15,7 @@ from reportlab.lib.units import mm
 from reportlab.pdfbase import pdfmetrics
 from reportlab.pdfbase.pdfmetrics import registerFontFamily
 from reportlab.pdfbase.ttfonts import TTFont
-from reportlab.platypus import Paragraph, SimpleDocTemplate, Spacer, Table, TableStyle
+from reportlab.platypus import PageBreak, Paragraph, SimpleDocTemplate, Spacer, Table, TableStyle
 
 FD = "/System/Library/Fonts/Supplemental/"
 pdfmetrics.registerFont(TTFont("Arial", FD + "Arial.ttf")); pdfmetrics.registerFont(TTFont("Arial-Bold", FD + "Arial Bold.ttf"))
@@ -122,6 +124,65 @@ def diagram():
     return d
 
 
+def diagram_production():
+    w, h = W, 330
+    d = Drawing(w, h)
+    # row 1: launcher -> dashboard ; the two ways processing starts
+    card(d, 0, 278, 128, 46, "1  Launcher (your Mac)", ["tile 'Processing dashboard':", "tunnel via xams to stbc-i1:8070"], LIGHT)
+    card(d, 150, 278, 150, 46, "2  Production dashboard", ["xamsdata, ~xamsdata/xams-dashboard", "screen xams_dashboard (stbc-i1)"], LIGHT)
+    card(d, 322, 252, w - 322, 72, "3  What starts processing", [
+        "a) online loop (stbc-i2, screen",
+        "   xams_auto_processing_online):",
+        "   new runs, corrections PROD0",
+        "b) dashboard 'Submit': targets,",
+        "   corrections version, amstrax ref"], LIGHT)
+    arrow(d, 128, 301, 150, 301)
+    arrow(d, 300, 301, 322, 301, "Submit", -12, 4)
+
+    # row 2: auto_processing -> condor ; corrections
+    y2 = 182
+    card(d, 0, y2, w * 0.47, 52, "4  auto_processing.py -> condor (xamsdata)", [
+        "amstrax/auto_processing_new: one job per run (process.py)",
+        "production amstrax checkout: /data/xenon/xams_v2/software/amstrax",
+        "status + history written to the run document"], AMBER)
+    card(d, w * 0.47 + 10, y2, w * 0.53 - 10, 52, "corrections version = a file in amstrax_files", [
+        "corrections/_global/_global_<version>.json: option -> file",
+        "  PROD0: gain_to_pe_array_v3, pos_rec_map_v1 (rest: defaults)",
+        "  v4: 20 options (gains, elife, drift, cuts, posrec, ...)"], AMBER, mono=(0,))
+    arrow(d, 322 + (w - 322) / 2, 252, w * 0.25, y2 + 52)
+
+    # row 3: the context ; MC / LED
+    y3 = 82
+    card(d, 0, y3, w * 0.62, 78, "5  The context = amstrax + a corrections version", [
+        "st = amstrax.contexts.xams(output_folder=xams_processed,",
+        "                           corrections_version=PROD0 | v4 | ...)",
+        "no version ('online'): amstrax defaults only (no gains: ADC·samples)",
+        "files read from GitHub amstrax_files master when the context is made",
+        "installed amstrax: plugin versions and defaults (PeakPositions 2.1.0)",
+        "LED runs: amstrax.contexts.xams_led (records_led, led_calibration)"], GREEN, mono=(0, 1))
+    arrow(d, w * 0.235, y2, w * 0.3, y3 + 78)
+    arrow(d, w * 0.47 + 10 + (w * 0.53 - 10) / 2, y2, w * 0.55, y3 + 78)
+    card(d, w * 0.62 + 10, y3, w * 0.38 - 10, 78, "6  Written and registered", [
+        "xams_processed/<run>-<type>-<hash>",
+        "(raw: xams_raw_records)",
+        "run document (runs_gas): data[]",
+        "{type, hash, corrections_version,", "location}, processing_status",
+        "MC (xams-sim): mc_*, runs_mc, MC1"], GREEN, mono=(0, 1))
+    arrow(d, w * 0.62, y3 + 39, w * 0.62 + 10, y3 + 39)
+
+    # row 4: status in the dashboard
+    y4 = 0
+    card(d, 0, y4, w, 66, "7  Status in the production dashboard", [
+        "run list: 'up to date' = event_info of the run's newest corrections version vs what the installed amstrax",
+        "                makes with that version (only event_info)",
+        "Inspect: every data set on disk vs the context of the corrections version recorded in data[]:",
+        "                'loadable' or 'older product: reprocess'",
+        "(no 'why?' yet: see docs/UNIFIED_DASHBOARD_REPORT.md)"], LIGHT)
+    arrow(d, w * 0.31, y3, w * 0.31, y4 + 66)
+    arrow(d, w * 0.81, y3, w * 0.81, y4 + 66)
+    return d
+
+
 def table(data, widths):
     dd = [[Paragraph(str(c), hdr if i == 0 else small) for c in r] for i, r in enumerate(data)]
     t = Table(dd, colWidths=widths)
@@ -168,10 +229,49 @@ def main(out):
             ["the app", f"{C('users/acolijn/software/xams-dashboard')} (your checkout), screen {C('xams_dashboard_private')}"],
         ], [W * 0.26, W * 0.74]),
     ]
+    story += [
+        PageBreak(),
+        Paragraph("How the production configuration works", h1),
+        Paragraph("Central processing on STBC (xamsdata) and the production dashboard — who defines what. XAMS, 27 October 2026.", sub),
+        Paragraph("<b>The difference with private:</b> the context is not defined by your analysis code but by "
+                  "<b>amstrax + a corrections version</b> from amstrax_files (e.g. PROD0), and every processed data set is "
+                  "<b>registered in the run database</b> (data[]). Same strax mechanism: folder name = lineage hash.", base),
+        Spacer(1, 6),
+        diagram_production(),
+        Spacer(1, 4),
+        Paragraph("What to change where", h2),
+        table([
+            ["You want …", "Change", "Effect"],
+            ["new gains in production", f"new {C('gain_to_pe_array_vN.json')} + a new global version (e.g. PROD1) in amstrax_files "
+             "(after the private analysis; you commit)", "new contexts with that version make new data; older data stay "
+             "registered with their version"],
+            ["a new position map", f"new {C('pos_rec_map_vN.json')} + global version", "PeakPositions and everything after it change"],
+            ["the version the online loop uses", f"{C('XAMS_AUTOPROC_CORRECTIONS')} in {C('ops/start_autoprocess_online.sh')} (default PROD0); "
+             "restart the loop (xamsdata, explicit OK)", "new runs are processed with it"],
+            ["a plugin change", f"amstrax PR, then {C('git pull')} of the production checkout (xamsdata, explicit OK)",
+             "data made before become 'older product' (e.g. PeakPositions 1.2 → 2.1)"],
+            ["reprocess runs", "dashboard: select runs → Submit (targets, corrections version)", "condor jobs, data[] and history updated"],
+            ["careful", f"amstrax_files is read from GitHub {C('master')} when a context is made", "a commit there changes "
+             "production at once for that version: make a new version instead of editing an existing one"],
+        ], [W * 0.22, W * 0.43, W * 0.35]),
+        Spacer(1, 4),
+        Paragraph("Where the files are", h2),
+        table([
+            ["What", "Where (STBC)"],
+            ["amstrax (production)", f"{C('/data/xenon/xams_v2/software/amstrax')}; loop in {C('amstrax/auto_processing_new/')}"],
+            ["corrections", f"GitHub XAMS-nikhef/amstrax_files: {C('corrections/_global/_global_&lt;version&gt;.json')} and "
+                            f"{C('corrections/&lt;option&gt;/&lt;file&gt;.json')} (per run range)"],
+            ["data", f"{C('xams_raw_records/')}, {C('xams_processed/')} (MC: {C('mc_raw_records/')}, {C('mc_processed/')}) "
+                     f"under {C('/data/xenon/xams_v2/')}; logs in {C('logs/')}"],
+            ["run database", f"{C('run.runs_gas')} (MC: {C('run.runs_mc')}): data[], processing_status, processing_history"],
+            ["dashboard", f"{C('~xamsdata/xams-dashboard')} (branch master-xams), screen {C('xams_dashboard')} on stbc-i1, port 8070; "
+                          f"online loop: screen {C('xams_auto_processing_online')} on stbc-i2"],
+        ], [W * 0.22, W * 0.78]),
+    ]
     SimpleDocTemplate(str(out), pagesize=A4, leftMargin=13 * mm, rightMargin=13 * mm, topMargin=11 * mm, bottomMargin=9 * mm,
-                      title="How the private configuration works", author="XAMS").build(story)
+                      title="How the private and production configuration work", author="XAMS").build(story)
     print("wrote", out)
 
 
 if __name__ == "__main__":
-    main(Path(sys.argv[1]) if len(sys.argv) > 1 else Path(__file__).with_name("XAMS_private_config.pdf"))
+    main(Path(sys.argv[1]) if len(sys.argv) > 1 else Path(__file__).with_name("XAMS_processing_config.pdf"))
