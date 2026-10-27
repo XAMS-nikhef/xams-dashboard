@@ -64,6 +64,7 @@ def _check_token():
 def _set_cookie(resp):
     if _token_ok(request.args.get("token")):
         resp.set_cookie(COOKIE, S.token, httponly=True, samesite="Strict", max_age=30 * 24 * 3600)
+    resp.headers["Cache-Control"] = "no-cache"               # after an update the browser fetches the new page / JS
     return resp
 
 
