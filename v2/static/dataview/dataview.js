@@ -1,8 +1,8 @@
-// Private dashboard: runs and data sets of the user's strax folder, status, keep marks, deletion, plots.
+// Data view (private dashboard and production /v3): runs and data sets, status, why?, keep marks, deletion, plots.
 const $ = (id) => document.getElementById(id);
 const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({"&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;"}[c]));
 const STATUS_ORDER = ["current", "outdated", "incomplete", "unknown", "pending"];
-let RUNS = [], selectedRun = null, pollTimer = null;
+let RUNS = [], selectedRun = null, pollTimer = null, DELETABLE = null;   // DELETABLE: statuses the profile may delete (null: any)
 let KIND = location.hash === "#mc" ? "mc" : "data";      // the tab: data runs or simulated runs (900000-999999)
 
 function gb(b) {
@@ -19,7 +19,7 @@ function stLabel(d) {
 
 async function api(path, body) {
   const opt = body === undefined ? {} : {method: "POST", headers: {"Content-Type": "application/json"}, body: JSON.stringify(body)};
-  const r = await fetch(path, opt);
+  const r = await fetch((window.BASE || "") + path, opt);
   const j = await r.json().catch(() => ({error: r.statusText}));
   if (!r.ok) throw new Error(j.error || r.statusText);
   return j;
@@ -36,7 +36,16 @@ function renderTotals(t, lin) {
   if (!lin.running && pollTimer) { clearInterval(pollTimer); pollTimer = null; }
 }
 
+function fillFilter(id, values) {
+  const sel = $(id), cur = sel.value, first = sel.options[0].outerHTML;
+  sel.innerHTML = first + [...values].filter(Boolean).sort().map((v) => `<option${v === cur ? " selected" : ""}>${esc(v)}</option>`).join("");
+}
+
 function runMatches(r) {
+  const i0 = r.info || {};
+  if ($("srFilter").value && i0.science_run !== $("srFilter").value) return false;
+  if ($("classFilter").value && i0.run_class !== $("classFilter").value) return false;
+  if ($("sourceFilter").value && i0.source !== $("sourceFilter").value) return false;
   const q = $("search").value.trim().toLowerCase();
   const f = $("statusFilter").value;
   if (f) {
@@ -79,7 +88,11 @@ async function loadRuns() {
   try {
     const j = await api("/api/runs?kind=" + KIND);
     RUNS = j.runs;
+    DELETABLE = j.delete_statuses;
+    for (const [id, k] of [["srFilter", "science_run"], ["classFilter", "run_class"], ["sourceFilter", "source"]])
+      fillFilter(id, new Set(RUNS.map((r) => (r.info || {})[k])));
     renderTotals(j.totals, j.lineage);
+    if (j.scanning) { $("lineageState").textContent = "Scanning the folders (the first time takes a few minutes)…"; if (!pollTimer) pollTimer = setInterval(loadRuns, 10000); }
     renderRuns();
     const sel = RUNS.find((r) => r.run === selectedRun);
     if (!sel) { selectedRun = null; $("dsTable").querySelector("tbody").innerHTML = ""; $("runInfo").textContent = ""; $("plots").innerHTML = ""; }
@@ -101,11 +114,11 @@ async function showWhy(d, tr) {
   if (next && next.classList.contains("why-row")) { next.remove(); return; }
   const row = document.createElement("tr");
   row.className = "why-row";
-  row.innerHTML = `<td colspan="9"><div class="why-box">loading…</div></td>`;
+  row.innerHTML = `<td colspan="10"><div class="why-box">loading…</div></td>`;
   tr.after(row);
   const box = row.querySelector(".why-box");
   try {
-    const j = await api(`/api/dataset/${encodeURIComponent(d.name)}/why`);
+    const j = await api(`/api/dataset/${encodeURIComponent(d.id)}/why`);
     if (!j.why) { box.textContent = j.pending ? "not computed yet (shown when the status computation is done)" : "not outdated"; return; }
     box.innerHTML = j.why.providers.map((p) => {
       const how = [p.own ? "its own plugin changed" : "", p.through.length ? "through " + p.through.join(", ") : ""].filter(Boolean).join("; ");
@@ -142,10 +155,13 @@ function renderDetail(r) {
   for (const d of r.datasets) {
     const tr = document.createElement("tr");
     const plottable = !d.temp && (d.dtype.startsWith("event") || d.dtype === "peak_basics");
-    tr.innerHTML = `<td><input type="checkbox" class="dsSel" value="${esc(d.name)}" ${checked.has(d.name) ? "checked" : ""} ${d.keep ? "disabled title='kept'" : ""}></td>`
+    const noDel = d.keep ? "kept" : (d.dtype === "live" ? "live data are never deleted"
+      : (DELETABLE && !DELETABLE.includes(d.status) ? `only ${DELETABLE.join(" / ")} data sets can be deleted here` : ""));
+    tr.innerHTML = `<td><input type="checkbox" class="dsSel" value="${esc(d.id)}" ${checked.has(d.id) ? "checked" : ""} ${noDel ? `disabled title="${esc(noDel)}"` : ""}></td>`
       + `<td>${esc(d.dtype)}</td><td><code>${esc(d.hash)}</code></td>`
       + `<td><span class="chip ${stClass(d)}">${esc(stLabel(d))}</span>${d.status === "outdated" ? ` <button class="linkbtn whyBtn">why?</button>` : ""}</td>`
       + `<td>${gb(d.size)}</td><td>${d.n_files}</td><td>${day(new Date(d.mtime * 1000).toISOString())}</td>`
+      + `<td class="hint">${esc(d.location || "")}${d.raw ? " (raw)" : ""}</td>`
       + `<td><button class="small keepBtn" title="${esc(d.keep_note || "")}">${d.keep ? "unkeep" : "keep"}</button></td>`
       + `<td>${plottable ? `<button class="small plotBtn">plot</button>` : ""}</td>`;
     tr.querySelector(".keepBtn").onclick = () => toggleKeep(d);
@@ -168,10 +184,10 @@ function updateSel() {
 async function toggleKeep(d) {
   let note = "";
   if (!d.keep) {
-    note = prompt(`Keep ${d.name}: why (optional, e.g. the note that uses it)?`, "");
+    note = prompt(`Keep ${d.id}: why (optional, e.g. the note that uses it)?`, "");
     if (note === null) return;
   }
-  await api("/api/keep", {name: d.name, keep: !d.keep, note});
+  await api("/api/keep", {name: d.id, keep: !d.keep, note});
   loadRuns();
 }
 
@@ -179,7 +195,7 @@ async function toggleKeep(d) {
 function confirmDialog(title, preview) {
   return new Promise((resolve) => {
     $("dlgTitle").textContent = title;
-    const rows = preview.delete.map((x) => `<tr><td>${esc(x.name)}</td><td>${gb(x.size)}</td></tr>`).join("");
+    const rows = preview.delete.map((x) => `<tr><td>${esc(x.name)}${x.note ? `<br><span class="warn">${esc(x.note)}</span>` : ""}</td><td>${gb(x.size)}</td></tr>`).join("");
     const ref = preview.refused.map((x) => `<li>${esc(x.name)}: ${esc(x.reason)}</li>`).join("");
     $("dlgBody").innerHTML = (preview.delete.length
       ? `<p>Delete <b>${preview.delete.length}</b> data sets, <b>${gb(preview.size)}</b>. This cannot be undone.</p><table>${rows}</table>`
@@ -248,9 +264,9 @@ function hist2d(x, y, logx, logy) {
 async function plotDataset(d) {
   $("plots").innerHTML = ""; $("plotInfo").textContent = "Loading " + d.name + " …";
   try {
-    const j = await api(`/api/dataset/${encodeURIComponent(d.name)}/plot`);
+    const j = await api(`/api/dataset/${encodeURIComponent(d.id)}/plot`);
     const c = j.columns;
-    $("plotInfo").textContent = `${d.name}: ${j.n} rows (read directly from the folder; log axes as log10)`;
+    $("plotInfo").textContent = `${d.id}: ${j.n} rows (read directly from the folder; log axes as log10)`;
     if (j.kind === "peak") {
       let [a, f] = pairs(c.area || [], c.area_fraction_top || [], true, false);
       addPlot("peak area vs area fraction top", hist2d(a, f, true, false), AX("log10 area [PE]"), AX("area fraction top"));
@@ -285,6 +301,7 @@ function setKind(k) {
 document.querySelectorAll(".nav-link[data-kind]").forEach((a) => (a.onclick = (e) => { e.preventDefault(); history.replaceState(null, "", "#" + a.dataset.kind); setKind(a.dataset.kind); }));
 document.querySelectorAll(".nav-link[data-kind]").forEach((a) => a.classList.toggle("active", a.dataset.kind === KIND));
 $("search").oninput = renderRuns;
+for (const id of ["srFilter", "classFilter", "sourceFilter"]) $(id).onchange = renderRuns;
 $("statusFilter").onchange = renderRuns;
 $("refreshBtn").onclick = async () => { await api("/api/refresh", {}); loadRuns(); };
 $("delOutdatedBtn").onclick = () => deleteOutdated().catch((e) => alert(e.message));

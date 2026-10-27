@@ -1,7 +1,13 @@
 # One dashboard for production and private: analysis
 
-Status: report (2026-10-27), nothing built. Question: can the production dashboard become as informative as the
-private one, with shared code instead of two separate apps?
+Status (2026-10-27): steps 1–3 built (branch unified-v3): shared core in `backend/common/`, profiles, one page
+(`v2/dataview.py`) for private and production; production at `/v3` on trial. Decisions taken (2026-10-27): current =
+PROD0 + v4 (+ LED, MC1); production deletes only outdated / incomplete data sets (list, confirm, log, `data[]` entry
+removed); raw records only when the run's live data are on STBC; live data never; keep marks yes; one week side by
+side, then `/` = the new page.
+
+Question of the report: can the production dashboard become as informative as the private one, with shared code
+instead of two separate apps?
 
 ## 1. Short answer
 

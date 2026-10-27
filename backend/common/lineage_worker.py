@@ -11,6 +11,8 @@ Providers (settings "contexts"):
         amstrax.contexts.<context>(**kwargs) with set_config(config)
     "runs": [first, last]   (optional) the provider only judges these runs; for others every hash is null
         (e.g. a context for simulated runs, which would otherwise also claim every data run)
+    "types": [...]          (optional) the provider only judges these data types (e.g. the LED context)
+A provider without "{run}" in its arguments makes one context for all runs (fast); with it, one per run.
 A hash is null when the provider cannot make that data type for that run (unknown run, unknown data type).
 Analyses with modules of the same name (two xams_sr.py) can be providers side by side: one process each.
 """
@@ -29,6 +31,10 @@ def _subst(v, run):
     if isinstance(v, dict):
         return {k: _subst(x, run) for k, x in v.items()}
     return v
+
+
+def _uses_run(v) -> bool:
+    return "{run}" in json.dumps(v)
 
 
 def _factory(p):
@@ -58,15 +64,28 @@ def main():
     real_stdout = sys.stdout
     sys.stdout = sys.stderr                                  # chatty imports must not spoil the JSON line
     try:
-        make = _factory(req["provider"])
-        lo, hi = req["provider"].get("runs") or (None, None)
+        prov = req["provider"]
+        make = _factory(prov)
+        lo, hi = prov.get("runs") or (None, None)
+        types = set(prov.get("types") or [])
+        per_run = _uses_run({k: prov.get(k) for k in ("args", "kwargs", "config")})
+        shared = None
         for run, dtypes in req["items"]:
             h = out["hashes"].setdefault(run, {})
             if lo is not None and not (int(lo) <= int(run) <= int(hi)):
                 h.update({t: None for t in dtypes})
                 continue
+            if types:
+                h.update({t: None for t in dtypes if t not in types})
+                dtypes = [t for t in dtypes if t in types]
+                if not dtypes:
+                    continue
             try:
-                st = make(run)
+                if per_run:
+                    st = make(run)
+                else:
+                    shared = shared or make(run)
+                    st = shared
             except Exception as e:                           # noqa: BLE001 (run unknown to this provider)
                 out["errors"][run] = f"{type(e).__name__}: {e}"[:300]
                 for t in dtypes:

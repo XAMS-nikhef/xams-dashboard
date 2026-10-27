@@ -73,6 +73,7 @@ class Lineage:
             return {}
 
     def _save(self):
+        self.folder.mkdir(parents=True, exist_ok=True)
         f = self.folder / CACHE_FILE
         tmp = f.with_suffix(".tmp")
         tmp.write_text(json.dumps(self.cache))

@@ -3,24 +3,26 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>XAMS Dashboard (private)</title>
+  <title>XAMS Dashboard ({{ profile.title }})</title>
   <script src="https://cdn.plot.ly/plotly-2.35.2.min.js"></script>
   <link rel="stylesheet" href="/static/v2/styles.css" />
-  <link rel="stylesheet" href="/static/private/private.css" />
+  <link rel="stylesheet" href="{{ url_for('dataview.static', filename='dataview.css') }}" />
+  <script>window.BASE = {{ base|tojson }}; window.PROFILE = {{ profile.name|tojson }};</script>
 </head>
 <body>
   <div class="bg"></div>
   <div class="app">
     <header class="topbar">
       <div class="title-wrap">
-        <h1>XAMS Dashboard <span>private</span></h1>
+        <h1>XAMS Dashboard <span>{{ profile.title }}</span></h1>
         <div class="nav-links">
           <a class="nav-link active" href="#data" data-kind="data">Data</a>
-          <a class="nav-link" href="#mc" data-kind="mc" title="simulated runs (900000-999999) in this folder">MC</a>
+          <a class="nav-link" href="#mc" data-kind="mc" title="simulated runs (900000-999999)">MC</a>
+          {% for label, url in profile.links %}<a class="nav-link" href="{{ url }}">{{ label }}</a>{% endfor %}
         </div>
       </div>
       <div class="folder-info">
-        <div><b>{{ user }}</b> · <code>{{ folder }}</code></div>
+        <div><b>{{ user }}</b> · {% for l in locations %}<code>{{ l }}</code>{% if not loop.last %}, {% endif %}{% endfor %}</div>
         <div class="hint">current = made by: {{ providers|join(', ') if providers else 'no context providers set' }}</div>
       </div>
     </header>
@@ -29,6 +31,9 @@
       <div class="totals" id="totals">…</div>
       <div class="controls">
         <input id="search" placeholder="Filter: run, data type, mode, source" />
+        <select id="srFilter"><option value="">all science runs</option></select>
+        <select id="classFilter"><option value="">all classes</option></select>
+        <select id="sourceFilter"><option value="">all sources</option></select>
         <select id="statusFilter">
           <option value="">all data sets</option>
           <option value="outdated">with outdated</option>
@@ -41,7 +46,7 @@
         <span class="spacer"></span>
         <label class="hint">older than <input id="olderDays" type="number" min="0" value="0" class="num" /> days</label>
         <label class="hint"><input id="inclIncomplete" type="checkbox" /> incl. incomplete</label>
-        <button id="delOutdatedBtn" class="btn-danger">Delete all outdated…</button>
+        <button id="delOutdatedBtn" class="btn-danger" title="outdated data sets that are not kept; never raw records (those only one by one)">Delete all outdated…</button>
       </div>
       <div class="hint" id="lineageState"></div>
     </section>
@@ -63,7 +68,7 @@
         <div class="table-wrap">
           <table id="dsTable">
             <thead><tr><th><input type="checkbox" id="selAll" /></th><th>data type</th><th>hash</th><th>status</th>
-              <th>size</th><th>files</th><th>made</th><th>keep</th><th></th></tr></thead>
+              <th>size</th><th>files</th><th>made</th><th>where</th><th>keep</th><th></th></tr></thead>
             <tbody></tbody>
           </table>
         </div>
@@ -90,6 +95,6 @@
       <button id="dlgOk" class="btn-danger">Delete</button>
     </div>
   </dialog>
-  <script src="/static/private/private.js"></script>
+  <script src="{{ url_for('dataview.static', filename='dataview.js') }}"></script>
 </body>
 </html>

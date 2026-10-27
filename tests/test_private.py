@@ -7,8 +7,8 @@ from pathlib import Path
 
 import pytest
 
-from backend.private import folder as F
-from backend.private.lineage import Lineage, fingerprint
+from backend.common import folder as F
+from backend.common.lineage import Lineage, fingerprint
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -96,7 +96,7 @@ def test_status_pending_until_computed(strax):
 
 def test_lineage_worker_function_provider(tmp_path):
     """The worker loads a provider file in its own process and reports null for what it cannot make."""
-    from backend.private.lineage import run_worker
+    from backend.common.lineage import run_worker
     (tmp_path / "prov.py").write_text(
         "class K:\n    def __init__(self, h): self.lineage_hash = h\n"
         "class St:\n    def __init__(self, run): self.run = run\n"
@@ -120,7 +120,7 @@ def client(strax, tmp_path, monkeypatch):
     monkeypatch.setenv("XAMS_PRIVATE_SETTINGS", str(s))
     sys.modules.pop("v2.private_app", None)
     mod = importlib.import_module("v2.private_app")
-    monkeypatch.setattr(mod, "_rundocs", lambda runs: {r: {} for r in runs})
+    monkeypatch.setattr(mod.view, "rundocs", lambda runs: {r: {} for r in runs})
     return mod.app.test_client()
 
 
@@ -150,9 +150,9 @@ def test_api_delete_outdated_preview(client):
     assert pv["deleted"] == []
 
 
-def test_production_app_does_not_use_private_mode():
+def test_production_app_does_not_use_private_settings():
     src = (ROOT / "v2" / "app.py").read_text()
-    assert "private" not in src
+    assert "backend.private" not in src and "private_app" not in src
 
 
 # ------------------------------------------------------------------ what changed (plan 3.3)
@@ -166,7 +166,7 @@ NEW = {"peaks": ["Peaks", "1.0", {"a": (3, 20)}],                               
 
 
 def test_diff_own_and_through():
-    from backend.private import whatchanged as W
+    from backend.common import whatchanged as W
     d = W.diff(OLD, NEW, "event_basics")
     assert d["own"] and d["through"] == ["peak_positions"]
     pp = next(c for c in d["changes"] if c["dtype"] == "peak_positions")
@@ -182,20 +182,20 @@ def test_diff_own_and_through():
 
 
 def test_diff_new_and_gone():
-    from backend.private import whatchanged as W
+    from backend.common import whatchanged as W
     d = W.diff({"a": ["A", "1", {}]}, {"b": ["B", "2", {}]}, "b")
     assert {c["kind"] for c in d["changes"]} == {"new", "gone"}
 
 
 def test_stored_lineage(strax):
-    from backend.private import whatchanged as W
+    from backend.common import whatchanged as W
     name = "007591-event_basics-aaaaaaaaaa"
     (strax / name / "event_basics-aaaaaaaaaa-metadata.json").write_text(json.dumps({"lineage": OLD}))
     assert W.stored_lineage(strax, name) == OLD
 
 
 def test_worker_lineage_mode(tmp_path):
-    from backend.private.lineage import run_worker
+    from backend.common.lineage import run_worker
     (tmp_path / "prov.py").write_text(
         "class K:\n    lineage_hash = 'h'\n    lineage = {'event_basics': ['EventBasics', '1.7', {'x': (1, 2)}]}\n"
         "class St:\n    def key_for(self, run, t): return K()\n"
@@ -206,13 +206,13 @@ def test_worker_lineage_mode(tmp_path):
 
 
 def test_api_why(client, strax):
-    from backend.private.lineage import fingerprint
+    from backend.common.lineage import fingerprint
     import v2.private_app as A
     name = "007591-event_basics-bbbbbbbbbb"
     (strax / name / "event_basics-bbbbbbbbbb-metadata.json").write_text(json.dumps({"lineage": OLD}))
     prov = {"name": "SR", "kind": "amstrax"}
-    A.lineage.providers = [prov]
-    A.lineage.cache = {fingerprint(prov): {"name": "SR", "errors": {},
+    A.view.lineage.providers = [prov]
+    A.view.lineage.cache = {fingerprint(prov): {"name": "SR", "errors": {},
                                            "hashes": {"007591": {"event_basics": "aaaaaaaaaa", "peaks": None},
                                                       "007592": {"peak_basics": None}},
                                            "lineages": {"007591": {"event_basics": NEW}}}}
@@ -232,3 +232,19 @@ def test_kind_tabs(client, strax):
     assert runs("data") == [7592, 7591] and runs("mc") == [990016]
     assert client.get("/api/runs?kind=mc").get_json()["totals"]["n_datasets"] == 1
     assert 990016 in runs("all")
+
+
+def test_worker_shared_context_and_types(tmp_path):
+    """A provider without {run} makes one context for all runs; "types" limits the data types it judges."""
+    from backend.common.lineage import run_worker
+    (tmp_path / "prov.py").write_text(
+        "N = [0]\n"
+        "class K:\n    def __init__(self, h): self.lineage_hash = h\n"
+        "class St:\n    def __init__(self): N[0] += 1; self.n = N[0]\n"
+        "    def key_for(self, run, t): return K(f'{t[:3]}{self.n}')\n"
+        "def ctx(): return St()\n")
+    res = run_worker({"kind": "function", "path": str(tmp_path / "prov.py"), "call": "ctx", "args": [],
+                      "types": ["records_led"]},
+                     [["007591", ["records_led", "peaks"]], ["007592", ["records_led"]]])
+    assert res["hashes"]["007591"] == {"records_led": "rec1", "peaks": None}
+    assert res["hashes"]["007592"] == {"records_led": "rec1"}                      # the same context: made once
