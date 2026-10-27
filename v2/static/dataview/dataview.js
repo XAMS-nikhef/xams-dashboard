@@ -59,29 +59,136 @@ function runMatches(r) {
   return hay.includes(q);
 }
 
+// The chain in its order: one column per data type in the run list (types not in it follow alphabetically).
+const CHAIN = ["raw_records", "raw_records_ext", "raw_records_sipm", "pulse_counts", "records_led", "led_calibration",
+  "peaks", "peaks_sipm", "peak_basics", "peak_positions", "events", "event_basics", "event_positions", "corrected_areas", "event_info"];
+const SHORT = {raw_records: "raw", raw_records_ext: "raw ext", raw_records_sipm: "raw sipm", pulse_counts: "pulses",
+  records_led: "led rec", led_calibration: "led cal", peaks: "peaks", peaks_sipm: "peaks sipm", peak_basics: "pk basics",
+  peak_positions: "pk pos", events: "events", event_basics: "ev basics", event_positions: "ev pos",
+  corrected_areas: "corr", event_info: "ev info"};
+let CAN_SUBMIT = false, SUBMIT_OPTS = null;
+
+function bestOf(ds) {
+  return ds.find((d) => d.status === "current") || ds.find((d) => d.keep)
+    || [...ds].sort((a, b) => STATUS_ORDER.indexOf(a.status) - STATUS_ORDER.indexOf(b.status))[0];
+}
+
+function typeColumns(runs) {
+  const seen = new Set(runs.flatMap((r) => r.datasets.map((d) => d.dtype)));
+  return [...CHAIN.filter((t) => seen.has(t)), ...[...seen].filter((t) => !CHAIN.includes(t)).sort()];
+}
+
+function jobText(r) {
+  const p = (r.info || {}).processing || "";
+  return r.job ? `<span class="warn">${esc(r.job)}</span>` : (p ? `<span class="hint">${esc(p)}</span>` : "");
+}
+
 function renderRuns() {
+  const runs = RUNS.filter(runMatches);
+  const cols = typeColumns(runs);
+  $("runsHead").innerHTML = "<tr>" + (CAN_SUBMIT ? `<th><input type="checkbox" id="runSelAll" title="select all shown"></th>` : "")
+    + "<th>run</th><th>mode / source</th><th>start</th><th>job</th>"
+    + cols.map((t) => `<th class="tcol" title="${esc(t)}">${esc(SHORT[t] || t)}</th>`).join("")
+    + "<th>size</th><th>older versions</th></tr>";
+  const checked = new Set([...document.querySelectorAll(".runSel:checked")].map((c) => Number(c.value)));
   const tb = $("runsTable").querySelector("tbody");
   tb.innerHTML = "";
-  for (const r of RUNS.filter(runMatches)) {
+  for (const r of runs) {
     const tr = document.createElement("tr");
     if (r.run === selectedRun) tr.className = "selected";
     const i = r.info || {};
     const byType = {};
     for (const d of r.datasets) (byType[d.dtype] = byType[d.dtype] || []).push(d);
-    const chips = Object.entries(byType).map(([t, ds]) => {
-      // one chip per data type, coloured by its best version; number of versions if more than one
-      const best = ds.find((d) => d.keep) || ds.find((d) => d.status === "current")
-        || ds.sort((a, b) => STATUS_ORDER.indexOf(a.status) - STATUS_ORDER.indexOf(b.status))[0];
-      const extra = ds.length > 1 ? ` ×${ds.length}` : "";
-      const tip = ds.map((d) => d.hash + ": " + stLabel(d) + ((d.why_labels || []).length ? "\n   " + d.why_labels.join("\n   ") : "")).join("\n");
-      return `<span class="chip ${stClass(best)}" title="${esc(tip)}">${esc(t)}${extra}</span>`;
+    let nOld = 0, sizeOld = 0;
+    const cells = cols.map((t) => {
+      const ds = byType[t];
+      if (!ds) return `<td class="blkcell"></td>`;
+      const best = bestOf(ds);
+      for (const d of ds) if (d !== best) { nOld += 1; sizeOld += d.size; }
+      const tip = t + "\n" + ds.map((d) => (d === best ? "▸ " : "  ") + d.hash + ": " + stLabel(d)
+        + ((d.why_labels || []).length ? "\n     " + d.why_labels.join("\n     ") : "")).join("\n");
+      return `<td class="blkcell"><span class="blk ${stClass(best)}" title="${esc(tip)}"></span></td>`;
     }).join("");
-    tr.innerHTML = `<td>${String(r.run).padStart(6, "0")}</td><td>${esc(i.mode || "")}<br><span class="hint">${esc(i.source || "")}</span></td>`
-      + `<td>${day(i.start)}</td><td><div class="chips">${chips}</div></td><td>${gb(r.size)}</td>`
-      + `<td>${r.outdated_size ? `<span class="bad">${gb(r.outdated_size)}</span>` : ""}</td>`;
-    tr.onclick = () => selectRun(r.run);
+    tr.innerHTML = (CAN_SUBMIT ? `<td><input type="checkbox" class="runSel" value="${r.run}" ${checked.has(r.run) ? "checked" : ""}></td>` : "")
+      + `<td>${String(r.run).padStart(6, "0")}</td><td>${esc(i.mode || "")}<br><span class="hint">${esc(i.source || "")}</span></td>`
+      + `<td>${day(i.start)}</td><td>${jobText(r)}</td>${cells}<td>${gb(r.size)}</td>`
+      + `<td>${nOld ? `<span class="${r.outdated_size ? "bad" : "hint"}">+${nOld} (${gb(sizeOld)})</span>` : ""}</td>`;
+    tr.onclick = (e) => { if (!e.target.classList.contains("runSel")) selectRun(r.run); };
     tb.appendChild(tr);
   }
+  const all = $("runSelAll");
+  if (all) all.onchange = (e) => { document.querySelectorAll(".runSel").forEach((c) => (c.checked = e.target.checked)); updateRunSel(); };
+  document.querySelectorAll(".runSel").forEach((c) => (c.onchange = updateRunSel));
+  updateRunSel();
+}
+
+function updateRunSel() {
+  const n = document.querySelectorAll(".runSel:checked").length;
+  $("processBtn").disabled = !CAN_SUBMIT || !n;
+  $("processBtn").textContent = CAN_SUBMIT ? (n ? `Process ${n} run${n > 1 ? "s" : ""}…` : "Process selected runs…") : "Process (later)";
+}
+
+// ------------------------------------------------------------------ processing (production: the host app's submission)
+async function openSubmit(runIds) {
+  if (!runIds.length) return;
+  SUBMIT_OPTS = SUBMIT_OPTS || await api("/api/submit-options");
+  const o = SUBMIT_OPTS;
+  $("subRuns").textContent = runIds.map((r) => String(r).padStart(6, "0")).join(", ");
+  $("subTargets").innerHTML = (o.targets || []).map((t) => `<label><input type="checkbox" class="subT" value="${esc(t)}" checked> ${esc(t)}</label>`).join(" ");
+  $("subVersion").innerHTML = (o.corrections_versions || []).map((v) => `<option${v === o.default_version ? " selected" : ""}>${esc(v)}</option>`).join("");
+  $("subInfo").textContent = `submit mode: ${o.submit_mode || "?"} · at most ${o.max_jobs || "?"} jobs, the rest waits on the waiting list`;
+  $("subResult").innerHTML = "";
+  $("subOk").disabled = false;
+  const dlg = $("submitDlg");
+  $("subCancel").onclick = () => dlg.close();
+  $("subOk").onclick = async () => {
+    $("subOk").disabled = true;
+    const targets = [...document.querySelectorAll(".subT:checked")].map((c) => c.value);
+    try {
+      const res = await api("/api/submit", {run_ids: runIds, targets, corrections_version: $("subVersion").value});
+      $("subResult").innerHTML = `<p>submitted ${res.submitted || 0} · waiting list ${res.queued || 0} · skipped ${res.skipped || 0} · failed ${res.failed || 0}</p>`
+        + `<ul>${(res.results || []).map((x) => `<li>${String(x.run_id).padStart(6, "0")}: ${esc(x.status || "")}${x.reason ? " — " + esc(x.reason) : ""}</li>`).join("")}</ul>`;
+      loadRuns();
+    } catch (e) { $("subResult").textContent = "Error: " + e.message; $("subOk").disabled = false; }
+  };
+  dlg.showModal();
+}
+
+// ------------------------------------------------------------------ the run document
+function kv(obj) {
+  return `<table class="kv">${Object.entries(obj || {}).map(([k, v]) => `<tr><th>${esc(k)}</th><td>${esc(typeof v === "object" && v !== null ? JSON.stringify(v) : v)}</td></tr>`).join("")}</table>`;
+}
+
+function scTable(snap) {
+  if (!snap) return "<p class='hint'>no slow-control snapshot</p>";
+  return ["start", "end"].filter((k) => snap[k]).map((k) => {
+    const v = snap[k].values || {};
+    return `<div><b>${k}</b> <span class="hint">${esc(snap[k].time || "")}</span><table class="kv">`
+      + Object.entries(v).map(([n, x]) => `<tr><th>${esc(n)}</th><td>${esc(x && x.value)} ${esc(x && x.unit || "")}${x && x.quality !== "ok" ? ` <span class="warn">${esc(x.quality)}</span>` : ""}</td></tr>`).join("")
+      + "</table></div>";
+  }).join("");
+}
+
+async function loadRunDoc(run) {
+  const box = $("runDoc");
+  if (!$("runDocBox").open || run === null) return;
+  box.innerHTML = "loading…";
+  try {
+    const d = await api(`/api/run/${run}/doc`);
+    if (selectedRun !== run) return;
+    const comments = (d.comments || []).map((c) => `<li>${esc(c.date || "")} ${esc(c.user || "")}: ${esc(c.comment || "")}</li>`).join("");
+    const hist = (d.processing_history || []).slice().reverse().map((h) => `<tr><td>${esc(h.time)}</td><td>${esc(h.user)}</td><td>${esc(h.action)}</td>`
+      + `<td>${esc(h.status)}</td><td>${esc((h.targets || []).join(", "))}</td><td>${esc(h.corrections_version || "")}</td><td>${esc(h.reason || h.job_name || "")}</td></tr>`).join("");
+    const data = (d.data || []).map((e) => `<tr><td>${esc(e.type)}</td><td>${esc(e.host)}</td><td>${esc(e.location)}</td>`
+      + `<td>${esc(e.corrections_version || "")}</td><td><code>${esc(e.lineage_hash || "")}</code></td><td>${e.on_disk_here ? "✓" : ""}</td></tr>`).join("");
+    const head = {number: d.number, mode: d.mode, start: d.start, end: d.end, user: d.user,
+      tags: (d.tags || []).map((t) => (t && t.name) || t).join(", "), ...(d.xams_bookkeeping || {})};
+    box.innerHTML = `<div class="doc-grid"><div><h4>Run</h4>${kv(head)}<h4>Comments</h4><ul>${comments || "<li class='hint'>none</li>"}</ul>`
+      + `<h4>Processing status</h4>${kv(d.processing_status)}</div><div><h4>Slow control (sc_snapshot)</h4>${scTable(d.sc_snapshot)}</div></div>`
+      + `<h4>Processing history</h4><table class="kv"><tr><th>time</th><th>user</th><th>action</th><th>status</th><th>targets</th><th>corrections</th><th>job / reason</th></tr>${hist}</table>`
+      + `<h4>data[] <span class="hint">(✓ = in a folder of this page)</span></h4><table class="kv"><tr><th>type</th><th>host</th><th>location</th><th>corrections</th><th>hash</th><th></th></tr>${data}</table>`
+      + `<details><summary>full JSON</summary><pre class="json">${esc(JSON.stringify(d, null, 1))}</pre></details>`;
+  } catch (e) { box.textContent = e.message; }
 }
 
 async function loadRuns() {
@@ -89,6 +196,7 @@ async function loadRuns() {
     const j = await api("/api/runs?kind=" + KIND);
     RUNS = j.runs;
     DELETABLE = j.delete_statuses;
+    CAN_SUBMIT = !!j.can_submit;
     for (const [id, k] of [["srFilter", "science_run"], ["classFilter", "run_class"], ["sourceFilter", "source"]])
       fillFilter(id, new Set(RUNS.map((r) => (r.info || {})[k])));
     renderTotals(j.totals, j.lineage);
@@ -140,12 +248,16 @@ function selectRun(run) {
   renderRuns();
   renderDetail(RUNS.find((r) => r.run === run));
   $("plots").innerHTML = ""; $("plotInfo").textContent = "";
+  $("runDoc").innerHTML = "";
+  loadRunDoc(run);
 }
 
 function renderDetail(r) {
   if (!r) { $("detailTitle").textContent = "Select a run"; return; }
   const i = r.info || {};
   $("detailTitle").textContent = `Run ${String(r.run).padStart(6, "0")} — ${gb(r.size)}`;
+  $("reprocBtn").style.display = CAN_SUBMIT ? "" : "none";
+  $("reprocBtn").onclick = () => openSubmit([r.run]);
   $("runInfo").innerHTML = [i.mode && `mode ${esc(i.mode)}`, i.source && `source ${esc(i.source)}`,
     i.start && `start ${day(i.start)}`, i.science_run && esc(i.science_run), i.comment && `“${esc(i.comment)}”`,
     i.error && `<span class="warn">run database: ${esc(i.error)}</span>`].filter(Boolean).join(" · ");
@@ -306,6 +418,8 @@ $("statusFilter").onchange = renderRuns;
 $("refreshBtn").onclick = async () => { await api("/api/refresh", {}); loadRuns(); };
 $("delOutdatedBtn").onclick = () => deleteOutdated().catch((e) => alert(e.message));
 $("delSelBtn").onclick = () => deleteNames([...document.querySelectorAll(".dsSel:checked")].map((c) => c.value)).catch((e) => alert(e.message));
+$("processBtn").onclick = () => openSubmit([...document.querySelectorAll(".runSel:checked")].map((c) => Number(c.value)));
+$("runDocBox").ontoggle = () => loadRunDoc(selectedRun);
 $("selAll").onchange = (e) => { document.querySelectorAll(".dsSel:not(:disabled)").forEach((c) => (c.checked = e.target.checked)); updateSel(); };
 loadRuns();
 loadDeletions();

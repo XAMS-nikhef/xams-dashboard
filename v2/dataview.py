@@ -25,6 +25,7 @@ from backend.common.lineage import Lineage, provider_name
 from backend.common.profile import MC_RUNS, NEVER_TYPES, RAW_TYPES
 
 RUNDOC_TTL = 600
+JOBS_TTL = 20                     # seconds the condor / waiting-list state is reused
 SCAN_TTL = 60                     # seconds a folder scan is reused before a new one starts (in the background)
 PLOT_FIELDS = {
     "event": ["s1_area", "s2_area", "cs1", "cs2", "drift_time", "x", "y", "s1_area_fraction_top"],
@@ -45,6 +46,18 @@ class DataView:
         self._scan = (0.0, [])
         self._scan_lock = threading.Lock()
         self._scanning = False
+        self._jobs = (0.0, {})
+
+    def jobs(self) -> dict:
+        """Job state per run (condor / waiting list) from the profile, cached JOBS_TTL seconds."""
+        if not self.p.jobs:
+            return {}
+        if time.time() - self._jobs[0] > JOBS_TTL:
+            try:
+                self._jobs = (time.time(), {int(k): str(v) for k, v in self.p.jobs().items()})
+            except Exception:                                    # noqa: BLE001
+                self._jobs = (time.time(), {})
+        return self._jobs[1]
 
     # -------------------------------------------------------------------------------------------- folders
     def _scan_now(self):
@@ -109,7 +122,7 @@ class DataView:
                 import amstrax  # type: ignore
                 found = {}
                 proj = {"number": 1, "mode": 1, "start": 1, "end": 1, "xams_bookkeeping": 1, "tags": 1, "comments": 1,
-                        "_id": 0}
+                        "processing_status": 1, "_id": 0}
                 for mc, part in ((False, [r for r in need if r < MC_RUNS[0]]), (True, [r for r in need if r >= MC_RUNS[0]])):
                     if not part:
                         continue
@@ -123,7 +136,9 @@ class DataView:
                             "source": xb.get("source_type") or "", "run_class": xb.get("run_class") or "",
                             "science_run": xb.get("science_run_id") or "",
                             "tags": [t.get("name") if isinstance(t, dict) else str(t) for t in d.get("tags") or []],
-                            "comment": str(last)[:200]}
+                            "comment": str(last)[:200],
+                            "processing": (d.get("processing_status") or {}).get("status", "")
+                            if isinstance(d.get("processing_status"), dict) else str(d.get("processing_status") or "")}
                 for r in need:
                     self._rundocs[r] = (now, found.get(r, {}))
             except Exception as e:                               # noqa: BLE001 (no database: folder view only)
@@ -254,15 +269,16 @@ def blueprint(profile, base: str = "") -> Blueprint:
         for r in rows:
             by_run.setdefault(r["run"], []).append(r)
         info = view.rundocs(sorted(by_run))
+        jobs = view.jobs()
         out = []
         for run in sorted(by_run, reverse=True):
             ds = by_run[run]
-            out.append({"run": run, "info": info.get(run, {}), "size": sum(d["size"] for d in ds),
+            out.append({"run": run, "info": info.get(run, {}), "job": jobs.get(run, ""), "size": sum(d["size"] for d in ds),
                         "outdated_size": sum(d["size"] for d in ds if d["status"] in ("outdated", "incomplete")
                                              and not d["keep"]),
                         "datasets": ds})
         return jsonify({"runs": out, "totals": _totals(rows), "lineage": view.lineage.state,
-                        "scanning": not view._scan[0],
+                        "scanning": not view._scan[0], "can_submit": bool(profile.submit),
                         "delete_statuses": sorted(profile.delete_statuses) if profile.delete_statuses else None})
 
     @bp.get("/api/run/<int:run>")
@@ -309,6 +325,42 @@ def blueprint(profile, base: str = "") -> Blueprint:
             return jsonify({"name": ds_id, "kind": kind, "n": len(a), "columns": cols})
         except Exception as e:                                   # noqa: BLE001
             return jsonify({"error": str(e)}), 400
+
+    @bp.get("/api/run/<int:run>/doc")
+    def run_doc(run: int):
+        """The run document (read-only; daq_config left out: large). Data[] entries marked when a folder of this
+        profile holds that data set."""
+        try:
+            import amstrax  # type: ignore
+            d = amstrax.get_run_collection(run).find_one({"number": run}, {"_id": 0, "daq_config": 0})
+        except Exception as e:                                   # noqa: BLE001
+            return jsonify({"error": f"run database: {str(e)[:200]}"}), 503
+        if not d:
+            return jsonify({"error": "not in the run database (private MC runs have no run document there)"}), 404
+        on_disk = {(r["dtype"], r["hash"]) for r in view.rows() if r["run"] == run}
+        for e in d.get("data") or []:
+            if isinstance(e, dict):
+                e["on_disk_here"] = (e.get("type"), e.get("lineage_hash")) in on_disk
+        return jsonify(json.loads(json.dumps(d, default=str)))
+
+    @bp.get("/api/submit-options")
+    def submit_options():
+        if not profile.submit:
+            return jsonify({"enabled": False})
+        return jsonify({"enabled": True, **(profile.submit_options() if profile.submit_options else {})})
+
+    @bp.post("/api/submit")
+    def submit():
+        """{"run_ids": [...], "targets": [...], "corrections_version": "PROD0"}: the host app's processing submission."""
+        if not profile.submit:
+            return jsonify({"error": "processing is not available on this page"}), 404
+        b = request.get_json(force=True, silent=True) or {}
+        ids = [int(r) for r in (b.get("run_ids") or [])][:200]
+        if not ids:
+            return jsonify({"error": "no runs"}), 400
+        res = profile.submit(ids, [str(t) for t in (b.get("targets") or [])], (b.get("corrections_version") or "").strip())
+        view._jobs = (0.0, {})
+        return jsonify(json.loads(json.dumps(res, default=str)))
 
     @bp.post("/api/refresh")
     def refresh():
