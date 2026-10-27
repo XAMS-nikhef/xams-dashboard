@@ -33,6 +33,17 @@ class DataSet:
     size: int
     n_files: int
     mtime: float
+    loc: int = 0                     # index of the profile location (folder) it is in
+
+    @property
+    def id(self) -> str:
+        """Unique over a profile's locations: the name in the first location, "<loc>:<name>" in the others."""
+        return self.name if self.loc == 0 else f"{self.loc}:{self.name}"
+
+
+def split_id(ds_id: str) -> tuple[int, str]:
+    loc, _, name = ds_id.rpartition(":")
+    return (int(loc) if loc.isdigit() else 0), name
 
 
 def parse(name: str):
@@ -55,22 +66,23 @@ def _size(path: Path) -> tuple[int, int, float]:
     return size, n, st.st_mtime
 
 
-def scan(folder: Path) -> list[DataSet]:
-    """All data sets in the folder (other files and folders are ignored)."""
+def scan(folder: Path, loc: int = 0, min_run: int = 0) -> list[DataSet]:
+    """All data sets in the folder (other files and folders are ignored); runs below min_run are skipped before
+    their size is read."""
     out = []
     with os.scandir(folder) as it:
         for e in it:
             p = parse(e.name)
-            if p is None or not e.is_dir(follow_symlinks=False):
+            if p is None or int(p["run"]) < min_run or not e.is_dir(follow_symlinks=False):
                 continue
             size, n, mtime = _size(Path(e.path))
             out.append(DataSet(name=e.name, run=int(p["run"]), dtype=p["dtype"], hash=p["hash"],
-                               temp=bool(p["temp"]), size=size, n_files=n, mtime=mtime))
+                               temp=bool(p["temp"]), size=size, n_files=n, mtime=mtime, loc=loc))
     return sorted(out, key=lambda d: (d.run, d.dtype, -d.mtime))
 
 
 def as_dict(d: DataSet) -> dict:
-    return asdict(d)
+    return {**asdict(d), "id": d.id}
 
 
 # ------------------------------------------------------------------------------------------------ keep marks
@@ -83,7 +95,8 @@ def load_keep(folder: Path) -> dict:
 
 
 def set_keep(folder: Path, name: str, keep: bool, note: str = "") -> dict:
-    if parse(name) is None:
+    """Keep mark of a data set (by its id) in the state folder `folder`."""
+    if parse(split_id(name)[1]) is None:
         raise ValueError(f"not a data set name: {name}")
     marks = load_keep(folder)
     if keep:

@@ -15,6 +15,13 @@ from backend.submit_queue import SubmitQueue
 
 app = Flask(__name__, template_folder='templates', static_folder='static')
 
+# The new data view (docs/UNIFIED_DASHBOARD_REPORT.md) on trial at /v3, next to this page; XAMS_DASH_V3=0 switches it
+# off. Shared with the private dashboard (v2/dataview.py, profile "production").
+if os.getenv('XAMS_DASH_V3', '1') != '0':
+    from backend.common.profile import production_profile
+    from v2.dataview import blueprint as _dataview
+    app.register_blueprint(_dataview(production_profile(), base='/v3'), url_prefix='/v3')
+
 mongo = MongoService()
 processing = ProcessingService()
 submit_queue = SubmitQueue(settings.queue_file)
