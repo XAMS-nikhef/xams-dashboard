@@ -205,7 +205,7 @@ def test_worker_lineage_mode(tmp_path):
     assert res["hashes"]["007591"]["event_basics"] == {"event_basics": ["EventBasics", "1.7", {"x": [1, 2]}]}
 
 
-def test_api_why_and_summary(client, strax):
+def test_api_why(client, strax):
     from backend.private.lineage import fingerprint
     import v2.private_app as A
     name = "007591-event_basics-bbbbbbbbbb"
@@ -219,9 +219,8 @@ def test_api_why_and_summary(client, strax):
     client.get("/?token=secret-token")
     w = client.get(f"/api/dataset/{name}/why").get_json()
     assert w["status"] == "outdated" and w["why"]["providers"][0]["through"] == ["peak_positions"]
-    j = client.get("/api/runs").get_json()
-    labs = {x["label"]: x for x in j["why_summary"]}
-    assert labs["PeakPositions 1.2.26 → 2.1.0"]["n"] == 1 and labs["PeakPositions 1.2.26 → 2.1.0"]["by_dtype"] == {"event_basics": 1}
+    row = next(d for r in client.get("/api/runs").get_json()["runs"] for d in r["datasets"] if d["name"] == name)
+    assert "PeakPositions 1.2.26 → 2.1.0" in row["why_labels"]                  # shown in the chip tooltip
     cur = client.get("/api/dataset/007591-event_basics-aaaaaaaaaa/why").get_json()
     assert cur["status"] == "current" and cur["why"] is None
 
