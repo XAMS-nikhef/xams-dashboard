@@ -385,14 +385,27 @@ def blueprint(profile, base: str = "") -> Blueprint:
 
     @bp.post("/api/delete-outdated")
     def delete_outdated():
-        """All outdated (with "incomplete": true also unfinished) data sets that are not kept, optionally older than
-        N days, of one kind (data / mc); preview unless confirm. Never raw records: those only one by one ("Delete
-        selected"), since a plugin version change can make thousands of them outdated at once."""
+        """All outdated (with "incomplete": true also unfinished) data sets that are not kept, optionally only of runs
+        that started more than N days ago (the run's start from its run document; the data set's write time where a
+        run has none, e.g. private MC), of one kind (data / mc); preview unless confirm. Never raw records: those only
+        one by one ("Delete selected"), since a plugin version change can make thousands of them outdated at once."""
         b = request.get_json(force=True, silent=True) or {}
         statuses = {"outdated"} | ({"incomplete"} if b.get("incomplete") else set())
-        cutoff = time.time() - float(b.get("older_than_days") or 0) * 86400
-        ids = [r["id"] for r in view.rows(b.get("kind"))
-               if r["status"] in statuses and not r["keep"] and not r["raw"] and r["mtime"] <= cutoff]
+        days = float(b.get("older_than_days") or 0)
+        cutoff = time.time() - days * 86400
+        rows = [r for r in view.rows(b.get("kind")) if r["status"] in statuses and not r["keep"] and not r["raw"]]
+        starts = view.rundocs(sorted({r["run"] for r in rows})) if days else {}
+
+        def age_ok(r):
+            if not days:
+                return True
+            s = (starts.get(r["run"]) or {}).get("start")
+            try:
+                t = datetime.fromisoformat(str(s)).timestamp() if s else r["mtime"]
+            except ValueError:
+                t = r["mtime"]
+            return t <= cutoff
+        ids = [r["id"] for r in rows if age_ok(r)]
         return jsonify(view.delete(ids, confirm=bool(b.get("confirm"))))
 
     @bp.get("/api/deletions")
