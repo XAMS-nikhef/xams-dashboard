@@ -135,3 +135,21 @@ def test_no_submit_without_host(view):
     assert c.get("/api/submit-options").get_json() == {"enabled": False}
     assert c.post("/api/submit", json={"run_ids": [7720]}).status_code == 404
     assert not c.get("/api/runs").get_json()["can_submit"]
+
+
+def test_bulk_outdated_by_run_age(view):
+    """'older than N days' looks at the run's start (run document), not at when the data set was written."""
+    from flask import Flask
+    from v2 import dataview as DV
+    import datetime as _dt
+    bp = DV.blueprint(view.p, base="")
+    bp.view.lineage = view.lineage
+    old = (_dt.datetime.now() - _dt.timedelta(days=400)).isoformat()
+    bp.view.rundocs = lambda runs: {r: {"start": old} for r in runs}       # an old run, data written just now
+    app = Flask("t", template_folder=str(Path(DV.__file__).parent / "templates"))
+    app.register_blueprint(bp)
+    c = app.test_client()
+    assert [x["name"] for x in c.post("/api/delete-outdated", json={"older_than_days": 30}).get_json()["delete"]] \
+        == ["007720-peak_positions-oldoldoldo"]
+    bp.view.rundocs = lambda runs: {r: {"start": _dt.datetime.now().isoformat()} for r in runs}   # a run of today
+    assert c.post("/api/delete-outdated", json={"older_than_days": 30}).get_json()["delete"] == []
