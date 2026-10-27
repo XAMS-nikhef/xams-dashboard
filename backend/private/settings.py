@@ -8,6 +8,8 @@ another). Read by the private dashboard (and later the private simulation app an
       "contexts": [                             # context providers: a data set is current if one of them makes it
         {"name": "SR2026.3", "python": "/path/to/python", "path": ".../analysis_SR2026.3/lib/xams_sr.py",
          "call": "context_for_runs", "args": [["{run}"]], "watch": [".../analysis_SR2026.3/config"]},
+        {"name": "MC", "python": "/path/to/python", "path": ".../xams_sr.py", "call": "context", "args": ["P1"],
+         "runs": [990000, 999999]},             # only these runs (simulated): see lineage_worker.py
         {"name": "central", "kind": "amstrax", "context": "xams", "config": {}}
       ],
       "max_jobs": 10                            # for the Process button (later)

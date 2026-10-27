@@ -108,6 +108,9 @@ def test_lineage_worker_function_provider(tmp_path):
                      [["007591", ["event_basics", "peaks"]], ["000001", ["event_basics"]]])
     assert res["hashes"]["007591"] == {"event_basics": "h7591", "peaks": None}
     assert res["hashes"]["000001"] == {"event_basics": None} and "not in my runs" in res["errors"]["000001"]
+    res = run_worker({"kind": "function", "path": str(tmp_path / "prov.py"), "call": "ctx", "args": ["{run}"],
+                      "runs": [990000, 999999]}, [["007591", ["event_basics"]], ["990016", ["event_basics"]]])
+    assert res["hashes"] == {"007591": {"event_basics": None}, "990016": {"event_basics": "h0016"}}
 
 
 @pytest.fixture

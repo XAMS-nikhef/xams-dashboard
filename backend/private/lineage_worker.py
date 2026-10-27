@@ -8,6 +8,8 @@ Providers (settings "contexts"):
         the function of a file (its folder on sys.path, so its own imports work); "{run}" in args = the run id
     {"kind": "amstrax", "context": "xams", "kwargs": {...}, "config": {...}}
         amstrax.contexts.<context>(**kwargs) with set_config(config)
+    "runs": [first, last]   (optional) the provider only judges these runs; for others every hash is null
+        (e.g. a context for simulated runs, which would otherwise also claim every data run)
 A hash is null when the provider cannot make that data type for that run (unknown run, unknown data type).
 Analyses with modules of the same name (two xams_sr.py) can be providers side by side: one process each.
 """
@@ -56,8 +58,12 @@ def main():
     sys.stdout = sys.stderr                                  # chatty imports must not spoil the JSON line
     try:
         make = _factory(req["provider"])
+        lo, hi = req["provider"].get("runs") or (None, None)
         for run, dtypes in req["items"]:
             h = out["hashes"].setdefault(run, {})
+            if lo is not None and not (int(lo) <= int(run) <= int(hi)):
+                h.update({t: None for t in dtypes})
+                continue
             try:
                 st = make(run)
             except Exception as e:                           # noqa: BLE001 (run unknown to this provider)
