@@ -15,8 +15,8 @@
       <div class="title-wrap">
         <h1>XAMS Dashboard <span>private</span></h1>
         <div class="nav-links">
-          <span class="nav-link active">Data</span>
-          <span class="nav-link disabled" title="next step: your private MC">MC (later)</span>
+          <a class="nav-link active" href="#data" data-kind="data">Data</a>
+          <a class="nav-link" href="#mc" data-kind="mc" title="simulated runs (900000-999999) in this folder">MC</a>
         </div>
       </div>
       <div class="folder-info">
@@ -44,6 +44,15 @@
         <button id="delOutdatedBtn" class="btn-danger">Delete all outdated…</button>
       </div>
       <div class="hint" id="lineageState"></div>
+    </section>
+
+    <section class="panel">
+      <div class="panel-title">Why outdated <span class="hint">(not kept; click a reason to show only its runs)</span>
+        <span id="whyFilterInfo"></span></div>
+      <div class="table-wrap why-wrap">
+        <table id="whyTable"><thead><tr><th>change (old → new)</th><th>data sets</th><th>runs</th><th>size</th></tr></thead>
+          <tbody></tbody></table>
+      </div>
     </section>
 
     <main class="private-grid">

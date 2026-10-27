@@ -1,7 +1,8 @@
 """Lineage hashes of one context provider, in its own process (run with the provider's python; no dashboard imports).
 
-stdin:  {"provider": {...}, "items": [["007591", ["event_basics", "peaks"]], ...]}
+stdin:  {"provider": {...}, "items": [["007591", ["event_basics", "peaks"]], ...], "want": "hash" | "lineage"}
 stdout: one JSON line: {"hashes": {"007591": {"event_basics": "hce5zq2ven", "peaks": null}}, "errors": {"007592": "..."}}
+        with "want": "lineage" the full current lineage instead of the hash ({data type: [plugin, version, options]})
 
 Providers (settings "contexts"):
     {"kind": "function", "path": ".../lib/xams_sr.py", "call": "context_for_runs", "args": [["{run}"]]}
@@ -73,13 +74,14 @@ def main():
                 continue
             for t in dtypes:
                 try:
-                    h[t] = st.key_for(run, t).lineage_hash
+                    key = st.key_for(run, t)
+                    h[t] = key.lineage if req.get("want") == "lineage" else key.lineage_hash
                 except Exception:                            # noqa: BLE001 (data type unknown to this context)
                     h[t] = None
     except Exception as e:                                   # noqa: BLE001
         out["fatal"] = f"{type(e).__name__}: {e}"[:500]
     sys.stdout = real_stdout
-    print(json.dumps(out))
+    print(json.dumps(out, default=str))
 
 
 if __name__ == "__main__":

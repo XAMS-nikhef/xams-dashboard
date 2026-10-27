@@ -2,7 +2,8 @@
 const $ = (id) => document.getElementById(id);
 const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({"&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;"}[c]));
 const STATUS_ORDER = ["current", "outdated", "incomplete", "unknown", "pending"];
-let RUNS = [], selectedRun = null, pollTimer = null;
+let RUNS = [], selectedRun = null, pollTimer = null, whyFilter = null, WHY = [];
+let KIND = location.hash === "#mc" ? "mc" : "data";      // the tab: data runs or simulated runs (900000-999999)
 
 function gb(b) {
   if (b >= 1e9) return (b / 1e9).toFixed(2) + " GB";
@@ -36,6 +37,7 @@ function renderTotals(t, lin) {
 }
 
 function runMatches(r) {
+  if (whyFilter && !r.datasets.some((d) => !d.keep && (d.why_labels || []).includes(whyFilter))) return false;
   const q = $("search").value.trim().toLowerCase();
   const f = $("statusFilter").value;
   if (f) {
@@ -63,7 +65,8 @@ function renderRuns() {
       const best = ds.find((d) => d.keep) || ds.find((d) => d.status === "current")
         || ds.sort((a, b) => STATUS_ORDER.indexOf(a.status) - STATUS_ORDER.indexOf(b.status))[0];
       const extra = ds.length > 1 ? ` ×${ds.length}` : "";
-      return `<span class="chip ${stClass(best)}" title="${esc(ds.map((d) => d.hash + ": " + stLabel(d)).join("\n"))}">${esc(t)}${extra}</span>`;
+      const tip = ds.map((d) => d.hash + ": " + stLabel(d) + ((d.why_labels || []).length ? "\n   " + d.why_labels.join("\n   ") : "")).join("\n");
+      return `<span class="chip ${stClass(best)}" title="${esc(tip)}">${esc(t)}${extra}</span>`;
     }).join("");
     tr.innerHTML = `<td>${String(r.run).padStart(6, "0")}</td><td>${esc(i.mode || "")}<br><span class="hint">${esc(i.source || "")}</span></td>`
       + `<td>${day(i.start)}</td><td><div class="chips">${chips}</div></td><td>${gb(r.size)}</td>`
@@ -75,12 +78,70 @@ function renderRuns() {
 
 async function loadRuns() {
   try {
-    const j = await api("/api/runs");
+    const j = await api("/api/runs?kind=" + KIND);
     RUNS = j.runs;
+    WHY = j.why_summary || [];
     renderTotals(j.totals, j.lineage);
+    renderWhy();
     renderRuns();
-    if (selectedRun !== null) renderDetail(RUNS.find((r) => r.run === selectedRun));
+    const sel = RUNS.find((r) => r.run === selectedRun);
+    if (!sel) { selectedRun = null; $("dsTable").querySelector("tbody").innerHTML = ""; $("runInfo").textContent = ""; $("plots").innerHTML = ""; }
+    renderDetail(sel);
   } catch (e) { $("totals").textContent = "Error: " + e.message; }
+}
+
+// ------------------------------------------------------------------ why outdated: summary over the folder
+function renderWhy() {
+  const tb = $("whyTable").querySelector("tbody");
+  if (whyFilter && !WHY.some((w) => w.label === whyFilter)) whyFilter = null;
+  tb.innerHTML = WHY.length ? "" : `<tr><td colspan="4" class="hint">nothing outdated</td></tr>`;
+  for (const w of WHY) {
+    const tr = document.createElement("tr");
+    if (w.label === whyFilter) tr.className = "selected";
+    const by = Object.entries(w.by_dtype).map(([t, n]) => `${esc(t)} ${n}`).join(", ");
+    tr.innerHTML = `<td>${esc(w.label)}</td><td>${w.n} <span class="hint">(${by})</span></td><td>${w.n_runs}</td><td>${gb(w.size)}</td>`;
+    tr.onclick = () => { whyFilter = whyFilter === w.label ? null : w.label; renderWhy(); renderRuns(); };
+    tb.appendChild(tr);
+  }
+  $("whyFilterInfo").innerHTML = whyFilter
+    ? ` — showing runs with: <b>${esc(whyFilter)}</b> <button class="linkbtn" id="whyClear">show all</button>` : "";
+  const c = $("whyClear");
+  if (c) c.onclick = (e) => { e.stopPropagation(); whyFilter = null; renderWhy(); renderRuns(); };
+}
+
+// one data set: the changes, old -> new, per provider that makes it
+function shortVal(v) {
+  if (v === null || v === undefined) return "—";
+  let s = typeof v === "string" ? v : JSON.stringify(v);
+  const m = s.match(/filename=([^&]+)/);
+  if (m) s = m[1];
+  return s.length > 70 ? s.slice(0, 69) + "…" : s;
+}
+
+async function showWhy(d, tr) {
+  const next = tr.nextElementSibling;
+  if (next && next.classList.contains("why-row")) { next.remove(); return; }
+  const row = document.createElement("tr");
+  row.className = "why-row";
+  row.innerHTML = `<td colspan="9"><div class="why-box">loading…</div></td>`;
+  tr.after(row);
+  const box = row.querySelector(".why-box");
+  try {
+    const j = await api(`/api/dataset/${encodeURIComponent(d.name)}/why`);
+    if (!j.why) { box.textContent = j.pending ? "not computed yet (shown when the status computation is done)" : "not outdated"; return; }
+    box.innerHTML = j.why.providers.map((p) => {
+      const how = [p.own ? "its own plugin changed" : "", p.through.length ? "through " + p.through.join(", ") : ""].filter(Boolean).join("; ");
+      const chg = p.changes.map((c) => {
+        const head = c.kind === "new" ? `new in the chain (${esc(c.plugin)} ${esc(c.version[1])})`
+          : c.kind === "gone" ? `no longer in the chain (${esc(c.plugin)})`
+          : esc(c.plugin) + (c.version ? `: version <span class="old">${esc(c.version[0])}</span> → <span class="new">${esc(c.version[1])}</span>` : "");
+        const opts = Object.entries(c.options || {}).map(([k, [a, b]]) =>
+          `<div class="opt" title="${esc(JSON.stringify(a))} → ${esc(JSON.stringify(b))}">${esc(k)}: <span class="old">${esc(shortVal(a))}</span> → <span class="new">${esc(shortVal(b))}</span></div>`).join("");
+        return `<div class="chg"><b>${esc(c.dtype)}</b> — ${head}${opts}</div>`;
+      }).join("") || "<div class='hint'>no difference in the lineage (only the hash differs)</div>";
+      return `<div><b>${esc(d.dtype)}</b> outdated for <b>${esc(p.provider)}</b>: ${esc(how)}</div>${chg}`;
+    }).join("<hr>");
+  } catch (e) { box.textContent = "Error: " + e.message; }
 }
 
 function selectRun(run) {
@@ -105,11 +166,13 @@ function renderDetail(r) {
     const plottable = !d.temp && (d.dtype.startsWith("event") || d.dtype === "peak_basics");
     tr.innerHTML = `<td><input type="checkbox" class="dsSel" value="${esc(d.name)}" ${checked.has(d.name) ? "checked" : ""} ${d.keep ? "disabled title='kept'" : ""}></td>`
       + `<td>${esc(d.dtype)}</td><td><code>${esc(d.hash)}</code></td>`
-      + `<td><span class="chip ${stClass(d)}">${esc(stLabel(d))}</span></td>`
+      + `<td><span class="chip ${stClass(d)}">${esc(stLabel(d))}</span>${d.status === "outdated" ? ` <button class="linkbtn whyBtn">why?</button>` : ""}</td>`
       + `<td>${gb(d.size)}</td><td>${d.n_files}</td><td>${day(new Date(d.mtime * 1000).toISOString())}</td>`
       + `<td><button class="small keepBtn" title="${esc(d.keep_note || "")}">${d.keep ? "unkeep" : "keep"}</button></td>`
       + `<td>${plottable ? `<button class="small plotBtn">plot</button>` : ""}</td>`;
     tr.querySelector(".keepBtn").onclick = () => toggleKeep(d);
+    const wb = tr.querySelector(".whyBtn");
+    if (wb) wb.onclick = () => showWhy(d, tr);
     const pb = tr.querySelector(".plotBtn");
     if (pb) pb.onclick = () => plotDataset(d);
     tb.appendChild(tr);
@@ -160,7 +223,7 @@ async function deleteNames(names) {
 }
 
 async function deleteOutdated() {
-  const body = {older_than_days: Number($("olderDays").value || 0), incomplete: $("inclIncomplete").checked};
+  const body = {older_than_days: Number($("olderDays").value || 0), incomplete: $("inclIncomplete").checked, kind: KIND};
   const pv = await api("/api/delete-outdated", {...body, confirm: false});
   if (!(await confirmDialog("Delete all outdated data sets (not kept)", pv))) return;
   const res = await api("/api/delete", {names: pv.delete.map((x) => x.name), confirm: true});
@@ -236,6 +299,14 @@ async function plotDataset(d) {
 }
 
 // ------------------------------------------------------------------ wiring
+function setKind(k) {
+  KIND = k;
+  document.querySelectorAll(".nav-link[data-kind]").forEach((a) => a.classList.toggle("active", a.dataset.kind === k));
+  whyFilter = null;
+  loadRuns();
+}
+document.querySelectorAll(".nav-link[data-kind]").forEach((a) => (a.onclick = (e) => { e.preventDefault(); history.replaceState(null, "", "#" + a.dataset.kind); setKind(a.dataset.kind); }));
+document.querySelectorAll(".nav-link[data-kind]").forEach((a) => a.classList.toggle("active", a.dataset.kind === KIND));
 $("search").oninput = renderRuns;
 $("statusFilter").onchange = renderRuns;
 $("refreshBtn").onclick = async () => { await api("/api/refresh", {}); loadRuns(); };
