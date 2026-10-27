@@ -224,3 +224,12 @@ def test_api_why_and_summary(client, strax):
     assert labs["PeakPositions 1.2.26 → 2.1.0"]["n"] == 1 and labs["PeakPositions 1.2.26 → 2.1.0"]["by_dtype"] == {"event_basics": 1}
     cur = client.get("/api/dataset/007591-event_basics-aaaaaaaaaa/why").get_json()
     assert cur["status"] == "current" and cur["why"] is None
+
+
+def test_kind_tabs(client, strax):
+    _ds(strax, "990016-peaks-gggggggggg", 10)
+    client.get("/?token=secret-token")
+    runs = lambda k: [x["run"] for x in client.get(f"/api/runs?kind={k}").get_json()["runs"]]
+    assert runs("data") == [7592, 7591] and runs("mc") == [990016]
+    assert client.get("/api/runs?kind=mc").get_json()["totals"]["n_datasets"] == 1
+    assert 990016 in runs("all")

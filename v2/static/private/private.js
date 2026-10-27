@@ -3,6 +3,7 @@ const $ = (id) => document.getElementById(id);
 const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({"&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;"}[c]));
 const STATUS_ORDER = ["current", "outdated", "incomplete", "unknown", "pending"];
 let RUNS = [], selectedRun = null, pollTimer = null, whyFilter = null, WHY = [];
+let KIND = location.hash === "#mc" ? "mc" : "data";      // the tab: data runs or simulated runs (900000-999999)
 
 function gb(b) {
   if (b >= 1e9) return (b / 1e9).toFixed(2) + " GB";
@@ -77,13 +78,15 @@ function renderRuns() {
 
 async function loadRuns() {
   try {
-    const j = await api("/api/runs");
+    const j = await api("/api/runs?kind=" + KIND);
     RUNS = j.runs;
     WHY = j.why_summary || [];
     renderTotals(j.totals, j.lineage);
     renderWhy();
     renderRuns();
-    if (selectedRun !== null) renderDetail(RUNS.find((r) => r.run === selectedRun));
+    const sel = RUNS.find((r) => r.run === selectedRun);
+    if (!sel) { selectedRun = null; $("dsTable").querySelector("tbody").innerHTML = ""; $("runInfo").textContent = ""; $("plots").innerHTML = ""; }
+    renderDetail(sel);
   } catch (e) { $("totals").textContent = "Error: " + e.message; }
 }
 
@@ -220,7 +223,7 @@ async function deleteNames(names) {
 }
 
 async function deleteOutdated() {
-  const body = {older_than_days: Number($("olderDays").value || 0), incomplete: $("inclIncomplete").checked};
+  const body = {older_than_days: Number($("olderDays").value || 0), incomplete: $("inclIncomplete").checked, kind: KIND};
   const pv = await api("/api/delete-outdated", {...body, confirm: false});
   if (!(await confirmDialog("Delete all outdated data sets (not kept)", pv))) return;
   const res = await api("/api/delete", {names: pv.delete.map((x) => x.name), confirm: true});
@@ -296,6 +299,14 @@ async function plotDataset(d) {
 }
 
 // ------------------------------------------------------------------ wiring
+function setKind(k) {
+  KIND = k;
+  document.querySelectorAll(".nav-link[data-kind]").forEach((a) => a.classList.toggle("active", a.dataset.kind === k));
+  whyFilter = null;
+  loadRuns();
+}
+document.querySelectorAll(".nav-link[data-kind]").forEach((a) => (a.onclick = (e) => { e.preventDefault(); history.replaceState(null, "", "#" + a.dataset.kind); setKind(a.dataset.kind); }));
+document.querySelectorAll(".nav-link[data-kind]").forEach((a) => a.classList.toggle("active", a.dataset.kind === KIND));
 $("search").oninput = renderRuns;
 $("statusFilter").onchange = renderRuns;
 $("refreshBtn").onclick = async () => { await api("/api/refresh", {}); loadRuns(); };

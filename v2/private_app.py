@@ -26,6 +26,7 @@ S = PrivateSettings.load()
 app = Flask(__name__, template_folder="templates", static_folder="static")
 lineage = Lineage(S.strax_folder, S.contexts)
 COOKIE = "xams_private_token"
+MC_RUNS = (900000, 999999)              # simulated runs (xams-sim): the MC tab; everything else: the Data tab
 _RUNDOCS: dict = {}                     # run -> (time, summary of its run document)
 _STORED_LINEAGE: dict = {}              # data set name -> (mtime, lineage from its metadata)
 RUNDOC_TTL = 600
@@ -126,7 +127,13 @@ def _why(d) -> dict | None:
     return {"providers": out, "labels": sorted({lab for x in out for lab in x["labels"]})}
 
 
-def _datasets():
+def _kind_ok(run: int, kind: str | None) -> bool:
+    if kind not in ("data", "mc"):
+        return True
+    return (MC_RUNS[0] <= run <= MC_RUNS[1]) == (kind == "mc")
+
+
+def _datasets(kind: str | None = None):
     ds = F.scan(S.strax_folder)
     lineage.start(ds)                                        # compute what is missing (background, no-op if done)
     keep = F.load_keep(S.strax_folder)
@@ -138,7 +145,7 @@ def _datasets():
             w = _why(d)
             row["why_labels"], row["why_pending"] = (w["labels"], False) if w else ([], True)
         rows.append(row)
-    return rows
+    return [r for r in rows if _kind_ok(r["run"], kind)]
 
 
 def _why_summary(rows) -> list:
@@ -185,7 +192,8 @@ def overview():
 
 @app.get("/api/runs")
 def runs():
-    rows = _datasets()
+    """?kind=data (runs below 900000) or mc (simulated runs 900000-999999); totals and summary for that kind."""
+    rows = _datasets(request.args.get("kind"))
     by_run: dict = {}
     for r in rows:
         by_run.setdefault(r["run"], []).append(r)
@@ -285,12 +293,12 @@ def delete():
 @app.post("/api/delete-outdated")
 def delete_outdated():
     """All outdated (and with "incomplete": true also unfinished) data sets that are not kept, optionally only those
-    older than N days; preview unless confirm."""
+    older than N days, of one kind ("kind": data / mc, as the tab shown); preview unless confirm."""
     b = request.get_json(force=True, silent=True) or {}
     days = float(b.get("older_than_days") or 0)
     statuses = {"outdated"} | ({"incomplete"} if b.get("incomplete") else set())
     cutoff = time.time() - days * 86400
-    names = [r["name"] for r in _datasets()
+    names = [r["name"] for r in _datasets(b.get("kind"))
              if r["status"] in statuses and not r["keep"] and r["mtime"] <= cutoff]
     return jsonify(F.delete(S.strax_folder, names, confirm=bool(b.get("confirm"))))
 
