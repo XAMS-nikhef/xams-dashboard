@@ -159,12 +159,16 @@ function kv(obj) {
   return `<table class="kv">${Object.entries(obj || {}).map(([k, v]) => `<tr><th>${esc(k)}</th><td>${esc(typeof v === "object" && v !== null ? JSON.stringify(v) : v)}</td></tr>`).join("")}</table>`;
 }
 
+function num(v) {
+  return typeof v === "number" && !Number.isInteger(v) ? Number(v.toPrecision(5)) : v;
+}
+
 function scTable(snap) {
   if (!snap) return "<p class='hint'>no slow-control snapshot</p>";
   return ["start", "end"].filter((k) => snap[k]).map((k) => {
     const v = snap[k].values || {};
     return `<div><b>${k}</b> <span class="hint">${esc(snap[k].time || "")}</span><table class="kv">`
-      + Object.entries(v).map(([n, x]) => `<tr><th>${esc(n)}</th><td>${esc(x && x.value)} ${esc(x && x.unit || "")}${x && x.quality !== "ok" ? ` <span class="warn">${esc(x.quality)}</span>` : ""}</td></tr>`).join("")
+      + Object.entries(v).map(([n, x]) => `<tr><th>${esc(n)}</th><td>${esc(num(x && x.value))} ${esc(x && x.unit || "")}${x && x.quality !== "ok" ? ` <span class="warn">${esc(x.quality)}</span>` : ""}</td></tr>`).join("")
       + "</table></div>";
   }).join("");
 }
