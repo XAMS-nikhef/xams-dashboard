@@ -265,7 +265,10 @@ class DataView:
                                         "status": (status.get(d.id) or {}).get("status"), "note": note}) + "\n")
             except Exception as e:                               # noqa: BLE001
                 out["errors"].append({"name": d.id, "error": str(e)})
-        self._scan = (time.time() - SCAN_TTL - 1, self._scan[1])  # rescan in the background at the next request
+        # the list must not show deleted data sets again: drop them from the last scan at once (a full rescan follows
+        # in the background at the next request)
+        gone = set(out["deleted"])
+        self._scan = (time.time() - SCAN_TTL - 1, [x for x in self._scan[1] if x.id not in gone])
         self._rows.clear()
         return out
 
