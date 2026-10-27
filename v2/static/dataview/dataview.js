@@ -110,7 +110,7 @@ function renderRuns() {
       return `<td class="blkcell"><span class="blk ${stClass(best)}" title="${esc(tip)}"></span></td>`;
     }).join("");
     tr.innerHTML = (CAN_SUBMIT ? `<td><input type="checkbox" class="runSel" value="${r.run}" ${checked.has(r.run) ? "checked" : ""}></td>` : "")
-      + `<td>${String(r.run).padStart(6, "0")}</td><td class="ms">${esc(i.mode || "")}<br><span class="hint">${esc(i.source || "")}</span></td>`
+      + `<td>${String(r.run).padStart(6, "0")}</td><td class="ms" title="${esc((i.mode || "") + " · " + (i.source || ""))}">${esc(i.mode || "")}<br><span class="hint">${esc(i.source || "")}</span></td>`
       + `<td class="nowrap" title="${esc(day(i.start))}">${esc(day(i.start).slice(5))}</td><td>${jobText(r)}</td>${cells}<td class="nowrap">${gb(r.size)}</td>`
       + `<td class="nowrap">${nOld ? `<span class="${r.outdated_size ? "bad" : "hint"}" title="${nOld} older versions, ${gb(sizeOld)}">+${nOld}</span>` : ""}</td>`;
     tr.onclick = (e) => { if (!e.target.classList.contains("runSel")) selectRun(r.run); };
