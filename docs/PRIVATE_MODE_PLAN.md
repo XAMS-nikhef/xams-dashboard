@@ -1,6 +1,7 @@
 # Private dashboard: plan
 
-Status: plan (2026-10-27), nothing built yet.
+Status (2026-10-27): step 1 built (XAMS-nikhef/xams-dashboard#15), launcher tile in XAMS-nikhef/xams-launcher#2;
+the rest is plan.
 
 ## 1. Goal
 
@@ -53,12 +54,36 @@ The same views as for data, for the user's private simulations (xams-sim, number
   (`for_mc_run`, corrections MC1), with the folders from the settings instead of the fixed `MC_RAW` /
   `MC_PROCESSED`.
 
-### 3.3 Process button
+### 3.3 What changed
+
+Per outdated data set: why it is outdated, before anything is processed again or deleted. The stored data set's
+lineage (its metadata) is compared with the lineage the provider that makes it would use now (`st.key_for(run,
+type).lineage`, in the provider's own process like the hashes):
+
+- per plugin in the chain: **version** changes (e.g. PeakPositions 1.2.26 → 2.1.0) and **option** changes, old → new
+  value (e.g. `pos_rec_params_v0` → `pos_rec_map_v1`, a gain file, a `processing.json` setting);
+- plugins that are new or gone in the chain;
+- whether the data type is outdated **only through a dependency** (e.g. `event_basics` through `peak_positions`) or
+  also through its own plugin;
+- values compared after JSON normalisation (lists vs tuples are no change).
+
+Shown in the run's data-set table (a "why?" next to the status) and as a summary over all outdated data sets ("312
+data sets outdated: PeakPositions 1.2.26 → 2.1.0 / pos_rec_map; 40: gain_to_pe_array gains_v2 → v3"), so one
+reason can be handled for many runs at once. Cached with the hashes (same fingerprint).
+
+Example (run 7720, SR2026.2, checked by hand 2026-10-27): `peaks`, `peak_basics`, `events` current; `peak_positions`
+outdated (PeakPositions 1.2.26 → 2.1.0: correlation method with `pos_rec_params_v0` → `pos_rec_map_v1`);
+`event_basics` outdated through `peak_positions` and its own version 1.6 → 1.7. Gains and settings unchanged: only
+x, y differ.
+
+### 3.4 Process button
 
 Shown greyed out ("later"). Later: submit private processing as condor jobs under the user's own account (limit on
-the number of jobs from the settings).
+the number of jobs from the settings). Builds on 3.3: select outdated data sets (or one reason of the summary),
+process them again with the provider that makes them current (strax reuses the current parts of the chain), then
+offer to delete the old versions.
 
-### 3.4 Delete
+### 3.5 Delete
 
 - Per data set, per version (hash), per run; bulk "delete all outdated" (optionally: older than N days).
 - Always first a list with sizes, then a confirmation.
@@ -115,8 +140,9 @@ everything goes through the tile.
    production mode unchanged.
 2. **MC tab:** private MC run documents from files, MC folders from the settings.
 3. **Launcher:** Settings tile, start / restart, `install_private.sh`, `start_private.sh`; per-user ports.
-4. **Handbook:** page "Private dashboard and simulations for your own account".
-5. **Later:** Process button (private condor jobs).
+4. **What changed** (3.3): per data set and as a summary over the folder.
+5. **Handbook:** page "Private dashboard and simulations for your own account".
+6. **Process button** (3.4, private condor jobs), after 3.3.
 
 ## 6. Open points
 
