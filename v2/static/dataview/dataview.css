@@ -62,3 +62,23 @@ pre.json{font-size:10.5px;max-height:40vh;overflow:auto}
 .table-wrap::-webkit-scrollbar-corner{background:#0f1729}
 /* the run list's column header stays in view while scrolling */
 #runsHead th{position:sticky;top:0;background:#14213a;z-index:1}
+/* layout: run list without horizontal scrolling, grouped actions, run panel header */
+.private-grid{grid-template-columns:minmax(0,11fr) minmax(0,9fr)}
+.runs-wrap{overflow-x:hidden}
+#runsTable{table-layout:auto}
+#runsTable th,#runsTable td{padding:4px 5px}
+#runsTable td.ms{font-size:11px;line-height:1.2}
+#runsTable .blkcell{padding:2px 1px}
+#runsTable .tcol{padding:4px 1px}
+.controls.actions{margin-top:8px}
+.bulk-opts{gap:10px}
+.detail-head{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:6px}
+.detail-head .panel-title{margin-bottom:0}
+#reprocBtn{padding:6px 14px}
+#runsTable td.ms{max-width:92px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+#runsTable td,#runsTable th{font-size:11.5px}
+@media (max-width:1150px){.private-grid{grid-template-columns:minmax(0,1fr)}}
+.controls .bulk-opts input.num{width:64px;min-width:0;flex:none}
+.bulk-opts label{display:inline-flex;align-items:center;gap:4px}
+.controls input[type=checkbox],#runsTable input[type=checkbox]{min-width:0;padding:0}
+#runsTable td:first-child,#runsTable th:first-child{padding-left:3px;padding-right:3px}
