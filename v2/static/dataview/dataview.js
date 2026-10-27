@@ -133,8 +133,10 @@ async function openSubmit(runIds) {
   SUBMIT_OPTS = SUBMIT_OPTS || await api("/api/submit-options");
   const o = SUBMIT_OPTS;
   $("subRuns").textContent = runIds.map((r) => String(r).padStart(6, "0")).join(", ");
-  $("subTargets").innerHTML = (o.targets || []).map((t) => `<label><input type="checkbox" class="subT" value="${esc(t)}" checked> ${esc(t)}</label>`).join(" ");
-  $("subVersion").innerHTML = (o.corrections_versions || []).map((v) => `<option${v === o.default_version ? " selected" : ""}>${esc(v)}</option>`).join("");
+  const defT = o.default_targets || o.targets || [], tl = o.target_labels || {}, vl = o.version_labels || {};
+  $("subTargets").innerHTML = (o.targets || []).map((t) => `<label class="nowrap"><input type="checkbox" class="subT" value="${esc(t)}" ${defT.includes(t) ? "checked" : ""}> ${esc(tl[t] || t)}</label>`).join(" &nbsp; ");
+  $("subVersionLabel").textContent = o.version_label || "Corrections version";
+  $("subVersion").innerHTML = (o.corrections_versions || []).map((v) => `<option value="${esc(v)}"${v === o.default_version ? " selected" : ""}>${esc(vl[v] || v)}</option>`).join("");
   $("subInfo").textContent = `submit mode: ${o.submit_mode || "?"} · at most ${o.max_jobs || "?"} jobs, the rest waits on the waiting list`;
   $("subResult").innerHTML = "";
   $("subOk").disabled = false;

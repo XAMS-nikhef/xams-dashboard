@@ -44,7 +44,7 @@
       </div>
       <div class="controls actions">
         <button id="refreshBtn" title="compute the current hashes again (after changing gains or settings)">Recompute status</button>
-        <button id="processBtn" disabled title="select runs in the list (production); private: later">Process (later)</button>
+        <button id="processBtn" disabled title="select runs in the list">Process selected runs…</button>
         <span class="spacer"></span>
         <span class="bulk-opts">
           <button id="delOutdatedBtn" class="btn-danger" title="outdated data sets that are not kept; never raw records (those only one by one)">Delete all outdated…</button>
@@ -108,7 +108,7 @@
     <div class="dlg-body">
       <p>Runs: <span id="subRuns"></span></p>
       <p>Targets: <span id="subTargets"></span></p>
-      <p>Corrections version: <select id="subVersion"></select></p>
+      <p><span id="subVersionLabel">Corrections version</span>: <select id="subVersion"></select></p>
       <p class="hint" id="subInfo"></p>
       <div id="subResult"></div>
     </div>

@@ -12,7 +12,8 @@ another). Read by the private dashboard (and later the private simulation app an
          "runs": [990000, 999999]},             # only these runs (simulated): see lineage_worker.py
         {"name": "central", "kind": "amstrax", "context": "xams", "config": {}}
       ],
-      "max_jobs": 10                            # for the Process button (later)
+      "max_jobs": 10,                           # Process: at most this many of your dashboard jobs in condor
+      "job_memory_mb": 8000                     # Process: memory per job
     }
 """
 from __future__ import annotations
@@ -39,6 +40,7 @@ class PrivateSettings:
     dashboard_port: int = field(default_factory=default_port)
     contexts: list = field(default_factory=list)
     max_jobs: int = 10
+    job_memory_mb: int = 8000
     path: Path | None = None
 
     @classmethod
@@ -51,4 +53,5 @@ class PrivateSettings:
             raise ValueError(f"{path}: 'strax_folder' is missing")
         return cls(strax_folder=Path(d["strax_folder"]), token=str(d.get("token") or ""),
                    dashboard_port=int(d.get("dashboard_port") or default_port()),
-                   contexts=list(d.get("contexts") or []), max_jobs=int(d.get("max_jobs") or 10), path=path)
+                   contexts=list(d.get("contexts") or []), max_jobs=int(d.get("max_jobs") or 10),
+                   job_memory_mb=int(d.get("job_memory_mb") or 8000), path=path)
