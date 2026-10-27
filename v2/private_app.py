@@ -14,14 +14,19 @@ import re
 from flask import Flask, abort, make_response, redirect, request
 
 from backend.common.profile import private_profile
+from backend.private.processing import PrivateProcessing
 from backend.private.settings import PrivateSettings
 from v2.dataview import blueprint
 
 S = PrivateSettings.load()
 app = Flask(__name__, template_folder="templates", static_folder="static")
 COOKIE = "xams_private_token"
-_bp = blueprint(private_profile(S), base="")
+_profile = private_profile(S)
+_bp = blueprint(_profile, base="")
 view = _bp.view
+# Process: the user's own condor jobs with their analysis contexts (backend/private/processing.py)
+processing = PrivateProcessing(view, max_jobs=S.max_jobs, memory_mb=S.job_memory_mb)
+_profile.submit, _profile.submit_options, _profile.jobs = processing.submit, processing.options, processing.jobs
 app.register_blueprint(_bp)
 
 

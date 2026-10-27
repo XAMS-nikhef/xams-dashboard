@@ -82,3 +82,16 @@ pre.json{font-size:10.5px;max-height:40vh;overflow:auto}
 .bulk-opts label{display:inline-flex;align-items:center;gap:4px}
 .controls input[type=checkbox],#runsTable input[type=checkbox]{min-width:0;padding:0}
 #runsTable td:first-child,#runsTable th:first-child{padding-left:3px;padding-right:3px}
+/* feedback: busy indicator, messages, visibly disabled buttons */
+button:disabled{opacity:.4;cursor:not-allowed;filter:grayscale(.6)}
+button.primary{background:#2f7fd1;border-color:#4db6ff;color:#fff}
+.busy{display:inline-flex;align-items:center;gap:8px;padding:6px 12px;border:1px solid #4db6ff;border-radius:999px;
+  background:#132a49;color:#cfeaff;font-size:13px}
+.busy[hidden]{display:none}
+.spin{display:inline-block;width:12px;height:12px;border:2px solid #4db6ff;border-top-color:transparent;border-radius:50%;
+  animation:spin .8s linear infinite;vertical-align:middle}
+@keyframes spin{to{transform:rotate(360deg)}}
+.toasts{position:fixed;right:16px;bottom:16px;display:flex;flex-direction:column;gap:8px;z-index:50;max-width:min(520px,90vw)}
+.toast{padding:10px 14px;border-radius:10px;border:1px solid var(--line);background:#14213a;color:var(--text);font-size:13px;
+  box-shadow:0 4px 14px rgba(0,0,0,.4)}
+.toast.ok{border-color:#2ecc71}.toast.warn{border-color:#f1c40f}.toast.bad{border-color:#ff6b6b}.toast.info{border-color:#4db6ff}
