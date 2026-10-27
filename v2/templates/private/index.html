@@ -1,0 +1,95 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>XAMS Dashboard (private)</title>
+  <script src="https://cdn.plot.ly/plotly-2.35.2.min.js"></script>
+  <link rel="stylesheet" href="/static/v2/styles.css" />
+  <link rel="stylesheet" href="/static/private/private.css" />
+</head>
+<body>
+  <div class="bg"></div>
+  <div class="app">
+    <header class="topbar">
+      <div class="title-wrap">
+        <h1>XAMS Dashboard <span>private</span></h1>
+        <div class="nav-links">
+          <span class="nav-link active">Data</span>
+          <span class="nav-link disabled" title="next step: your private MC">MC (later)</span>
+        </div>
+      </div>
+      <div class="folder-info">
+        <div><b>{{ user }}</b> · <code>{{ folder }}</code></div>
+        <div class="hint">current = made by: {{ providers|join(', ') if providers else 'no context providers set' }}</div>
+      </div>
+    </header>
+
+    <section class="panel">
+      <div class="totals" id="totals">…</div>
+      <div class="controls">
+        <input id="search" placeholder="Filter: run, data type, mode, source" />
+        <select id="statusFilter">
+          <option value="">all data sets</option>
+          <option value="outdated">with outdated</option>
+          <option value="incomplete">with incomplete</option>
+          <option value="unknown">with unknown</option>
+          <option value="keep">with keep</option>
+        </select>
+        <button id="refreshBtn" title="compute the current hashes again (after changing gains or settings)">Recompute status</button>
+        <button id="processBtn" disabled title="later: submit private processing as condor jobs under your account">Process (later)</button>
+        <span class="spacer"></span>
+        <label class="hint">older than <input id="olderDays" type="number" min="0" value="0" class="num" /> days</label>
+        <label class="hint"><input id="inclIncomplete" type="checkbox" /> incl. incomplete</label>
+        <button id="delOutdatedBtn" class="btn-danger">Delete all outdated…</button>
+      </div>
+      <div class="hint" id="lineageState"></div>
+    </section>
+
+    <main class="private-grid">
+      <section class="panel">
+        <div class="panel-title">Runs</div>
+        <div class="table-wrap runs-wrap">
+          <table id="runsTable">
+            <thead><tr><th>run</th><th>mode / source</th><th>start</th><th>data sets</th><th>size</th><th>outdated</th></tr></thead>
+            <tbody></tbody>
+          </table>
+        </div>
+      </section>
+
+      <section class="panel" id="detailPanel">
+        <div class="panel-title" id="detailTitle">Select a run</div>
+        <div id="runInfo" class="hint"></div>
+        <div class="table-wrap">
+          <table id="dsTable">
+            <thead><tr><th><input type="checkbox" id="selAll" /></th><th>data type</th><th>hash</th><th>status</th>
+              <th>size</th><th>files</th><th>made</th><th>keep</th><th></th></tr></thead>
+            <tbody></tbody>
+          </table>
+        </div>
+        <div class="controls">
+          <button id="delSelBtn" class="btn-danger" disabled>Delete selected…</button>
+          <span class="hint" id="selInfo"></span>
+        </div>
+        <div class="plots-grid" id="plots"></div>
+        <div class="hint" id="plotInfo"></div>
+      </section>
+    </main>
+
+    <section class="panel">
+      <div class="panel-title">Deletions</div>
+      <div class="table-wrap del-wrap"><table id="delTable"><thead><tr><th>time</th><th>user</th><th>data set</th><th>size</th></tr></thead><tbody></tbody></table></div>
+    </section>
+  </div>
+
+  <dialog id="confirmDlg">
+    <h3 id="dlgTitle">Delete</h3>
+    <div id="dlgBody" class="dlg-body"></div>
+    <div class="controls">
+      <button id="dlgCancel">Cancel</button>
+      <button id="dlgOk" class="btn-danger">Delete</button>
+    </div>
+  </dialog>
+  <script src="/static/private/private.js"></script>
+</body>
+</html>

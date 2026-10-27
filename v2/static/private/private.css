@@ -1,0 +1,27 @@
+/* Private dashboard: additions to /static/v2/styles.css */
+.nav-link.disabled{opacity:.45;cursor:default}
+.folder-info{text-align:right;font-size:13px}
+.folder-info code{color:var(--muted)}
+.totals{display:flex;gap:18px;flex-wrap:wrap;font-size:14px;margin-bottom:8px}
+.totals .t{padding:6px 10px;border:1px solid var(--line);border-radius:8px;background:#0f1729}
+.totals .t b{font-size:16px}
+.spacer{flex:1}
+.num{width:60px}
+.private-grid{display:grid;grid-template-columns:minmax(420px,5fr) 7fr;gap:12px;margin:12px 0}
+@media (max-width:1100px){.private-grid{grid-template-columns:1fr}}
+.runs-wrap{max-height:70vh;overflow:auto}
+.del-wrap{max-height:30vh;overflow:auto}
+.chips{display:flex;flex-wrap:wrap;gap:3px}
+.chip{font-size:11px;padding:1px 6px;border-radius:999px;border:1px solid var(--line);white-space:nowrap}
+.st-current{background:#163d2a;border-color:#2ecc71;color:#bff5d4}
+.st-outdated{background:#4a2020;border-color:#ff6b6b;color:#ffd0d0}
+.st-incomplete{background:#4a3d12;border-color:#f1c40f;color:#fff0b3}
+.st-unknown{background:#1c2740;color:var(--muted)}
+.st-pending{background:#1c2740;color:var(--muted);border-style:dashed}
+.st-keep{background:#173a5a;border-color:#4db6ff;color:#cfeaff}
+#runsTable tbody tr{cursor:pointer}
+#runsTable tr.selected{background:#1b3354}
+.dlg-body{max-height:50vh;overflow:auto;font-size:13px}
+dialog{background:var(--panel);color:var(--text);border:1px solid var(--line);border-radius:10px;max-width:760px;width:90%}
+dialog::backdrop{background:rgba(0,0,0,.6)}
+.small{font-size:11px;padding:2px 6px}
