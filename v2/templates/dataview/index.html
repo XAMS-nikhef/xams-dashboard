@@ -21,6 +21,7 @@
           {% for label, url in profile.links %}<a class="nav-link" href="{{ url }}">{{ label }}</a>{% endfor %}
         </div>
       </div>
+      <span id="busy" class="busy" hidden><span class="spin"></span><span id="busyText">working…</span></span>
       <div class="folder-info">
         <div><b>{{ user }}</b> · {% for l in locations %}<code>{{ l }}</code>{% if not loop.last %}, {% endif %}{% endfor %}</div>
         <div class="hint">current = made by: {{ providers|join(', ') if providers else 'no context providers set' }}</div>
@@ -103,6 +104,7 @@
       <button id="dlgOk" class="btn-danger">Delete</button>
     </div>
   </dialog>
+  <div id="toasts" class="toasts"></div>
   <dialog id="submitDlg">
     <h3>Process runs</h3>
     <div class="dlg-body">

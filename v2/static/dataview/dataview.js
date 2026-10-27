@@ -17,6 +17,31 @@ function stLabel(d) {
   return d.status === "current" && d.current_for.length ? `${s} (${d.current_for.join(", ")})` : s;
 }
 
+// ------------------------------------------------------------------ feedback: busy indicator, messages
+const ACTION_BTNS = ["refreshBtn", "processBtn", "delOutdatedBtn", "delSelBtn", "reprocBtn"];
+let BUSY = 0;
+function busy(text) {
+  BUSY += 1;
+  $("busyText").textContent = text;
+  $("busy").hidden = false;
+  ACTION_BTNS.forEach((id) => { const b = $(id); if (b) { b.dataset.wasDisabled = b.dataset.wasDisabled ?? String(b.disabled); b.disabled = true; } });
+  return () => {
+    BUSY = Math.max(0, BUSY - 1);
+    if (BUSY) return;
+    $("busy").hidden = true;
+    ACTION_BTNS.forEach((id) => { const b = $(id); if (b && b.dataset.wasDisabled !== undefined) { b.disabled = b.dataset.wasDisabled === "true"; delete b.dataset.wasDisabled; } });
+    updateRunSel(); updateSel();
+  };
+}
+function toast(msg, kind = "ok", ms = 8000) {
+  const t = document.createElement("div");
+  t.className = "toast " + kind;
+  t.innerHTML = msg + ' <button class="linkbtn" aria-label="close">×</button>';
+  t.querySelector("button").onclick = () => t.remove();
+  $("toasts").appendChild(t);
+  if (ms) setTimeout(() => t.remove(), ms);
+}
+
 async function api(path, body) {
   const opt = body === undefined ? {} : {method: "POST", headers: {"Content-Type": "application/json"}, body: JSON.stringify(body)};
   const r = await fetch((window.BASE || "") + path, opt);
@@ -140,17 +165,34 @@ async function openSubmit(runIds) {
   $("subInfo").textContent = `submit mode: ${o.submit_mode || "?"} · at most ${o.max_jobs || "?"} jobs, the rest waits on the waiting list`;
   $("subResult").innerHTML = "";
   $("subOk").disabled = false;
+  $("subOk").hidden = false;
+  $("subOk").textContent = "Submit";
+  $("subCancel").textContent = "Cancel";
+  $("subCancel").classList.remove("primary");
   const dlg = $("submitDlg");
   $("subCancel").onclick = () => dlg.close();
   $("subOk").onclick = async () => {
     $("subOk").disabled = true;
+    $("subOk").textContent = "Submitting…";
+    $("subResult").innerHTML = `<p class="hint"><span class="spin"></span> submitting ${runIds.length} run${runIds.length > 1 ? "s" : ""}…</p>`;
+    const done = busy(`Submitting ${runIds.length} run${runIds.length > 1 ? "s" : ""}…`);
     const targets = [...document.querySelectorAll(".subT:checked")].map((c) => c.value);
     try {
       const res = await api("/api/submit", {run_ids: runIds, targets, corrections_version: $("subVersion").value});
-      $("subResult").innerHTML = `<p>submitted ${res.submitted || 0} · waiting list ${res.queued || 0} · skipped ${res.skipped || 0} · failed ${res.failed || 0}</p>`
-        + `<ul>${(res.results || []).map((x) => `<li>${String(x.run_id).padStart(6, "0")}: ${esc(x.status || "")}${x.reason ? " — " + esc(x.reason) : ""}</li>`).join("")}</ul>`;
+      $("subResult").innerHTML = `<p><b>Done:</b> submitted ${res.submitted || 0} · waiting list ${res.queued || 0} · skipped ${res.skipped || 0} · failed ${res.failed || 0}</p>`
+        + `<ul>${(res.results || []).map((x) => `<li>${String(x.run_id).padStart(6, "0")}: <b>${esc(x.status || "")}</b>${x.reason ? " — " + esc(x.reason) : ""}</li>`).join("")}</ul>`
+        + `<p class="hint">The "job" column of the run list shows the jobs (refreshes every 20 s).</p>`;
+      $("subOk").hidden = true;                                  // submitted: no second submit by accident
+      $("subCancel").textContent = "Close";
+      $("subCancel").classList.add("primary");
+      toast(`Submitted ${res.submitted || 0} run(s)` + (res.queued ? `, ${res.queued} on the waiting list` : "")
+        + (res.skipped ? `, ${res.skipped} skipped` : "") + (res.failed ? `, <b>${res.failed} failed</b>` : ""), res.failed ? "warn" : "ok");
       loadRuns();
-    } catch (e) { $("subResult").textContent = "Error: " + e.message; $("subOk").disabled = false; }
+    } catch (e) {
+      $("subResult").innerHTML = `<p class="bad">Error: ${esc(e.message)}</p>`;
+      $("subOk").disabled = false; $("subOk").textContent = "Submit";
+      toast("Submit failed: " + esc(e.message), "bad");
+    } finally { done(); }
   };
   dlg.showModal();
 }
@@ -306,7 +348,10 @@ async function toggleKeep(d) {
     note = prompt(`Keep ${d.id}: why (optional, e.g. the note that uses it)?`, "");
     if (note === null) return;
   }
-  await api("/api/keep", {name: d.id, keep: !d.keep, note});
+  try {
+    await api("/api/keep", {name: d.id, keep: !d.keep, note});
+    toast(d.keep ? `${esc(d.id)}: keep mark removed` : `${esc(d.id)}: marked keep`, "ok", 4000);
+  } catch (e) { toast("Keep failed: " + esc(e.message), "bad"); }
   loadRuns();
 }
 
@@ -327,21 +372,32 @@ function confirmDialog(title, preview) {
   });
 }
 
-async function deleteNames(names) {
-  const pv = await api("/api/delete", {names, confirm: false});
-  if (!(await confirmDialog("Delete selected data sets", pv))) return;
-  const res = await api("/api/delete", {names: pv.delete.map((x) => x.name), confirm: true});
-  if (res.errors.length) alert("Errors:\n" + res.errors.map((e) => e.name + ": " + e.error).join("\n"));
+async function runDelete(title, previewFn) {
+  // 1. preview (can take a while in production: the status of every data set), 2. confirm, 3. delete; busy throughout
+  let done = busy("Preparing the list of data sets…");
+  let pv;
+  try { pv = await previewFn(); } catch (e) { toast("Could not make the list: " + esc(e.message), "bad"); done(); return; }
+  done();
+  if (!(await confirmDialog(title, pv))) { toast("Nothing deleted (cancelled).", "info", 4000); return; }
+  done = busy(`Deleting ${pv.delete.length} data set${pv.delete.length === 1 ? "" : "s"} (${gb(pv.size)})…`);
+  try {
+    const res = await api("/api/delete", {names: pv.delete.map((x) => x.name), confirm: true});
+    const n = res.deleted.length;
+    toast(`Deleted ${n} data set${n === 1 ? "" : "s"} (${gb(pv.delete.filter((x) => res.deleted.includes(x.name)).reduce((a, x) => a + x.size, 0))})`
+      + (res.errors.length ? `; <b>${res.errors.length} errors</b>: ` + res.errors.slice(0, 3).map((e) => esc(e.name + ": " + e.error)).join("; ") : ""),
+      res.errors.length ? "warn" : "ok", res.errors.length ? 0 : 8000);
+  } catch (e) { toast("Delete failed: " + esc(e.message), "bad", 0); }
+  finally { done(); }
   loadRuns(); loadDeletions();
 }
 
-async function deleteOutdated() {
+function deleteNames(names) {
+  return runDelete("Delete selected data sets", () => api("/api/delete", {names, confirm: false}));
+}
+
+function deleteOutdated() {
   const body = {older_than_days: Number($("olderDays").value || 0), incomplete: $("inclIncomplete").checked, kind: KIND};
-  const pv = await api("/api/delete-outdated", {...body, confirm: false});
-  if (!(await confirmDialog("Delete all outdated data sets (not kept)", pv))) return;
-  const res = await api("/api/delete", {names: pv.delete.map((x) => x.name), confirm: true});
-  if (res.errors.length) alert("Errors:\n" + res.errors.map((e) => e.name + ": " + e.error).join("\n"));
-  loadRuns(); loadDeletions();
+  return runDelete("Delete all outdated data sets (not kept)", () => api("/api/delete-outdated", {...body, confirm: false}));
 }
 
 async function loadDeletions() {
@@ -422,9 +478,15 @@ document.querySelectorAll(".nav-link[data-kind]").forEach((a) => a.classList.tog
 $("search").oninput = renderRuns;
 for (const id of ["srFilter", "classFilter", "sourceFilter"]) $(id).onchange = renderRuns;
 $("statusFilter").onchange = renderRuns;
-$("refreshBtn").onclick = async () => { await api("/api/refresh", {}); loadRuns(); };
-$("delOutdatedBtn").onclick = () => deleteOutdated().catch((e) => alert(e.message));
-$("delSelBtn").onclick = () => deleteNames([...document.querySelectorAll(".dsSel:checked")].map((c) => c.value)).catch((e) => alert(e.message));
+$("refreshBtn").onclick = async () => {
+  const done = busy("Starting the status computation…");
+  try { await api("/api/refresh", {}); toast("Status is being recomputed in the background (status 'pending' until done).", "info"); }
+  catch (e) { toast("Recompute failed: " + esc(e.message), "bad"); }
+  finally { done(); }
+  loadRuns();
+};
+$("delOutdatedBtn").onclick = () => deleteOutdated();
+$("delSelBtn").onclick = () => deleteNames([...document.querySelectorAll(".dsSel:checked")].map((c) => c.value));
 $("processBtn").onclick = () => openSubmit([...document.querySelectorAll(".runSel:checked")].map((c) => Number(c.value)));
 $("runDocBox").ontoggle = () => loadRunDoc(selectedRun);
 $("selAll").onchange = (e) => { document.querySelectorAll(".dsSel:not(:disabled)").forEach((c) => (c.checked = e.target.checked)); updateSel(); };
