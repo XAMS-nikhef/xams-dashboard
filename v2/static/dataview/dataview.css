@@ -78,3 +78,5 @@ pre.json{font-size:10.5px;max-height:40vh;overflow:auto}
 #runsTable td.ms{max-width:92px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 #runsTable td,#runsTable th{font-size:11.5px}
 @media (max-width:1150px){.private-grid{grid-template-columns:minmax(0,1fr)}}
+.controls .bulk-opts input.num{width:64px;min-width:0;flex:none}
+.bulk-opts label{display:inline-flex;align-items:center;gap:4px}
