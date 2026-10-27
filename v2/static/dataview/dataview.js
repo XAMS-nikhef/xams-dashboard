@@ -89,7 +89,7 @@ function renderRuns() {
   $("runsHead").innerHTML = "<tr>" + (CAN_SUBMIT ? `<th><input type="checkbox" id="runSelAll" title="select all shown"></th>` : "")
     + "<th>run</th><th>mode / source</th><th>start</th><th>job</th>"
     + cols.map((t) => `<th class="tcol" title="${esc(t)}">${esc(SHORT[t] || t)}</th>`).join("")
-    + "<th>size</th><th>older versions</th></tr>";
+    + "<th>size</th><th>older</th></tr>";
   const checked = new Set([...document.querySelectorAll(".runSel:checked")].map((c) => Number(c.value)));
   const tb = $("runsTable").querySelector("tbody");
   tb.innerHTML = "";
@@ -110,9 +110,9 @@ function renderRuns() {
       return `<td class="blkcell"><span class="blk ${stClass(best)}" title="${esc(tip)}"></span></td>`;
     }).join("");
     tr.innerHTML = (CAN_SUBMIT ? `<td><input type="checkbox" class="runSel" value="${r.run}" ${checked.has(r.run) ? "checked" : ""}></td>` : "")
-      + `<td>${String(r.run).padStart(6, "0")}</td><td>${esc(i.mode || "")}<br><span class="hint">${esc(i.source || "")}</span></td>`
-      + `<td>${day(i.start)}</td><td>${jobText(r)}</td>${cells}<td>${gb(r.size)}</td>`
-      + `<td>${nOld ? `<span class="${r.outdated_size ? "bad" : "hint"}">+${nOld} (${gb(sizeOld)})</span>` : ""}</td>`;
+      + `<td>${String(r.run).padStart(6, "0")}</td><td class="ms">${esc(i.mode || "")}<br><span class="hint">${esc(i.source || "")}</span></td>`
+      + `<td class="nowrap" title="${esc(day(i.start))}">${esc(day(i.start).slice(5))}</td><td>${jobText(r)}</td>${cells}<td class="nowrap">${gb(r.size)}</td>`
+      + `<td class="nowrap">${nOld ? `<span class="${r.outdated_size ? "bad" : "hint"}" title="${nOld} older versions, ${gb(sizeOld)}">+${nOld}</span>` : ""}</td>`;
     tr.onclick = (e) => { if (!e.target.classList.contains("runSel")) selectRun(r.run); };
     tb.appendChild(tr);
   }
