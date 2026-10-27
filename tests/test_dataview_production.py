@@ -88,3 +88,15 @@ def test_production_providers(monkeypatch, tmp_path):
     assert ps[0]["kwargs"]["corrections_version"] == "PROD0" and ps[0]["runs"] == [0, 899999]
     assert ps[2]["types"] == ["records_led", "led_calibration"]
     assert Path(ps[3]["path"]).exists() and ps[3]["runs"] == [900000, 999999]
+
+
+def test_bulk_outdated_never_raw(view, tmp_path):
+    from flask import Flask
+    from v2 import dataview as DV
+    bp = DV.blueprint(view.p, base="")
+    bp.view.lineage = view.lineage
+    bp.view.rundocs = lambda runs: {r: {} for r in runs}
+    app = Flask("t", template_folder=str(Path(DV.__file__).parent / "templates"))
+    app.register_blueprint(bp)
+    pv = app.test_client().post("/api/delete-outdated", json={"incomplete": True}).get_json()
+    assert [x["name"] for x in pv["delete"]] == ["007720-peak_positions-oldoldoldo"]      # raw and kept left out

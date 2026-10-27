@@ -334,12 +334,13 @@ def blueprint(profile, base: str = "") -> Blueprint:
     @bp.post("/api/delete-outdated")
     def delete_outdated():
         """All outdated (with "incomplete": true also unfinished) data sets that are not kept, optionally older than
-        N days, of one kind (data / mc); preview unless confirm."""
+        N days, of one kind (data / mc); preview unless confirm. Never raw records: those only one by one ("Delete
+        selected"), since a plugin version change can make thousands of them outdated at once."""
         b = request.get_json(force=True, silent=True) or {}
         statuses = {"outdated"} | ({"incomplete"} if b.get("incomplete") else set())
         cutoff = time.time() - float(b.get("older_than_days") or 0) * 86400
         ids = [r["id"] for r in view.rows(b.get("kind"))
-               if r["status"] in statuses and not r["keep"] and r["mtime"] <= cutoff]
+               if r["status"] in statuses and not r["keep"] and not r["raw"] and r["mtime"] <= cutoff]
         return jsonify(view.delete(ids, confirm=bool(b.get("confirm"))))
 
     @bp.get("/api/deletions")
