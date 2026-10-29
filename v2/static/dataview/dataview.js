@@ -109,7 +109,7 @@ function typeColumns(runs) {
 
 function jobText(r) {
   const p = (r.info || {}).processing || "";
-  return r.job ? `<span class="warn">${esc(r.job)}</span>` : (p ? `<span class="hint">${esc(p)}</span>` : "");
+  return r.job ? `<span class="warn">${esc(r.job)}</span>` : (p ? `<span class="${p === "failed" ? "hint bad" : "hint"}">${esc(p)}</span>` : "");
 }
 
 function renderRuns() {
