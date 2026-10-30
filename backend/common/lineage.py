@@ -11,8 +11,10 @@ Status of a data set:
 The hashes are computed in the background, one subprocess per provider (lineage_worker.py), and cached in the strax
 folder (.dashboard_lineage.json) per provider fingerprint; after them, for every outdated data set, the full current
 lineage of the providers that make it (for "what changed", whatchanged.py). Fingerprint: the provider's settings plus the modification times of its
-file and its "watch" paths (e.g. the analysis config folder with gains and processing settings). A change there makes
-the provider compute again; "refresh" forces it.
+file and its "watch" paths (e.g. the analysis config folder with gains and processing settings) and, for an amstrax
+provider with a corrections_version, the content of that version in amstrax_files (the _global file and the files it
+names): lineages hold file names, not contents, so a version that moves under the same name (ONLINE) must still make the
+provider compute again. A change there makes the provider compute again; "refresh" forces it.
 """
 from __future__ import annotations
 
@@ -23,6 +25,7 @@ import subprocess
 import sys
 import threading
 import time
+import urllib.request
 from pathlib import Path
 
 CACHE_FILE = ".dashboard_lineage.json"
@@ -59,8 +62,44 @@ def _fingerprint(provider: dict) -> str:
     watch = list(provider.get("watch") or [])
     if provider.get("path"):
         watch.append(provider["path"])
-    blob = json.dumps({"provider": provider, "mtimes": _mtimes(watch)}, sort_keys=True)
-    return hashlib.sha1(blob.encode()).hexdigest()[:12]
+    blob = {"provider": provider, "mtimes": _mtimes(watch)}
+    version = (provider.get("kwargs") or {}).get("corrections_version") if provider.get("kind") == "amstrax" else None
+    if version:
+        blob["corrections"] = corrections_signature(str(version))
+    return hashlib.sha1(json.dumps(blob, sort_keys=True).encode()).hexdigest()[:12]
+
+
+# Content of a corrections version in amstrax_files, as amstrax fetches it (raw GitHub, master). The lineage of a data set
+# holds the correction *file names*; ONLINE keeps its names while their content changes, so the name alone does not tell
+# whether the cached hashes are still right.
+CORRECTIONS_URL = os.environ.get("XAMS_DASH_CORRECTIONS_URL",
+                                 "https://raw.githubusercontent.com/XAMS-nikhef/amstrax_files/master/corrections")
+SIG_TTL = 600.0                               # seconds a version's signature is reused (one fetch per file per 10 min)
+_SIG: dict = {}                               # version -> (time, signature)
+
+
+def _fetch(url: str) -> bytes:
+    with urllib.request.urlopen(url, timeout=10) as r:
+        return r.read()
+
+
+def corrections_signature(version: str):
+    """sha1 of the _global file of a corrections version and of every .json file it names (dir = name up to the last
+    '_', as amstrax's get_correction). On a fetch error the last known signature is kept (None if never fetched), so a
+    network hiccup does not make every provider compute again."""
+    hit = _SIG.get(version)
+    if hit and time.time() - hit[0] < SIG_TTL:
+        return hit[1]
+    try:
+        g = _fetch(f"{CORRECTIONS_URL}/_global/_global_{version}.json")
+        h = hashlib.sha1(g)
+        for name in sorted(v for v in json.loads(g).values() if isinstance(v, str) and v.endswith(".json")):
+            h.update(name.encode() + _fetch(f"{CORRECTIONS_URL}/{name.rsplit('_', 1)[0]}/{name}"))
+        sig = h.hexdigest()[:12]
+    except Exception:                         # noqa: BLE001  (offline, GitHub down, unknown version)
+        sig = hit[1] if hit else None
+    _SIG[version] = (time.time(), sig)
+    return sig
 
 
 def provider_name(provider: dict, i: int) -> str:
