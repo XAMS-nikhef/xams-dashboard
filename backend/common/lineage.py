@@ -30,7 +30,21 @@ from pathlib import Path
 
 CACHE_FILE = ".dashboard_lineage.json"
 WORKER = Path(__file__).with_name("lineage_worker.py")
-BATCH = 40                                    # runs per worker call (results are saved after each batch)
+BATCH = 40                                    # runs per worker call for a provider with one context per run ("{run}")
+BATCH_SHARED = 5000                           # runs per worker call for a provider with one context for all runs: a worker
+                                              # call costs ~5 s to start (import amstrax, make the context) and ~1 ms per
+                                              # run, so 40-run batches spent ~1 h on start-up for 8 versions (30-10-2026)
+
+
+def batch_size(provider: dict) -> int:
+    """Runs per worker call: small batches only where every run needs its own context."""
+    per_run = "{run}" in json.dumps({k: provider.get(k) for k in ("args", "kwargs", "config")})
+    return BATCH if per_run else BATCH_SHARED
+
+
+def lineage_key(lineage) -> str:
+    """Key of a full lineage in the provider's lineage store (identical lineages of many runs are stored once)."""
+    return hashlib.sha1(json.dumps(lineage, sort_keys=True, default=str).encode()).hexdigest()[:16]
 
 
 def _mtimes(paths) -> list:
@@ -197,13 +211,19 @@ class Lineage:
         for i, fp, miss in todo:
             p = self.providers[i]
             entry = self.cache.setdefault(fp, {"name": provider_name(p, i), "hashes": {}, "errors": {}})
-            items = sorted(miss.items())
-            for k in range(0, len(items), BATCH):
-                res = run_worker(p, items[k:k + BATCH], want="lineage")
+            items, b = sorted(miss.items()), batch_size(p)
+            store = entry.setdefault("lineage_store", {})
+            for k in range(0, len(items), b):
+                res = run_worker(p, items[k:k + b], want="lineage")
                 if res.get("fatal"):
                     raise RuntimeError(f"{provider_name(p, i)}: {res['fatal']}")
                 for r, h in res.get("hashes", {}).items():
-                    entry.setdefault("lineages", {}).setdefault(r, {}).update({t: v for t, v in h.items() if v})
+                    keys = {}
+                    for t, v in h.items():
+                        if v:
+                            keys[t] = lineage_key(v)
+                            store.setdefault(keys[t], v)
+                    entry.setdefault("lineages", {}).setdefault(r, {}).update(keys)
                 with self._lock:
                     self._save()
 
@@ -211,7 +231,10 @@ class Lineage:
         """[(provider name, current lineage)] of the providers that make data set d's type for its run."""
         run, out = f"{d.run:06d}", []
         for i, p in enumerate(self.providers):
-            lin = ((self.cache.get(fingerprint(p)) or {}).get("lineages", {}).get(run) or {}).get(d.dtype)
+            entry = self.cache.get(fingerprint(p)) or {}
+            lin = (entry.get("lineages", {}).get(run) or {}).get(d.dtype)
+            if isinstance(lin, str):                         # key into the lineage store (older caches hold the lineage)
+                lin = entry.get("lineage_store", {}).get(lin)
             if lin:
                 out.append((provider_name(p, i), lin))
         return out
@@ -220,9 +243,9 @@ class Lineage:
         for i, fp, miss in todo:
             p = self.providers[i]
             entry = self.cache.setdefault(fp, {"name": provider_name(p, i), "hashes": {}, "errors": {}})
-            items = sorted(miss.items())
-            for k in range(0, len(items), BATCH):
-                res = run_worker(p, items[k:k + BATCH])
+            items, b = sorted(miss.items()), batch_size(p)
+            for k in range(0, len(items), b):
+                res = run_worker(p, items[k:k + b])
                 if res.get("fatal"):
                     raise RuntimeError(f"{provider_name(p, i)}: {res['fatal']}")
                 for r, h in res.get("hashes", {}).items():

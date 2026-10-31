@@ -13,6 +13,7 @@ import os
 import re
 import shutil
 import time
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import asdict, dataclass
 from pathlib import Path
 
@@ -21,6 +22,7 @@ KEEP_FILE = ".dashboard_keep.json"
 LOG_FILE = ".dashboard_deletions.log"
 
 _SIZES: dict = {}            # folder path -> (mtime, size, n_files)
+SCAN_THREADS = int(os.environ.get("XAMS_DASH_SCAN_THREADS", "16"))   # parallel directory listings in scan()
 
 
 @dataclass
@@ -69,15 +71,19 @@ def _size(path: Path) -> tuple[int, int, float]:
 def scan(folder: Path, loc: int = 0, min_run: int = 0) -> list[DataSet]:
     """All data sets in the folder (other files and folders are ignored); runs below min_run are skipped before
     their size is read."""
-    out = []
+    found = []
     with os.scandir(folder) as it:
         for e in it:
             p = parse(e.name)
             if p is None or int(p["run"]) < min_run or not e.is_dir(follow_symlinks=False):
                 continue
-            size, n, mtime = _size(Path(e.path))
-            out.append(DataSet(name=e.name, run=int(p["run"]), dtype=p["dtype"], hash=p["hash"],
-                               temp=bool(p["temp"]), size=size, n_files=n, mtime=mtime, loc=loc))
+            found.append((e, p))
+    # the sizes need one directory listing per data set: on NFS that is latency-bound (10k raw_records sets: ~3 min
+    # serially, 30-10-2026), so list them in parallel
+    with ThreadPoolExecutor(max_workers=SCAN_THREADS) as ex:
+        sizes = list(ex.map(lambda ep: _size(Path(ep[0].path)), found))
+    out = [DataSet(name=e.name, run=int(p["run"]), dtype=p["dtype"], hash=p["hash"], temp=bool(p["temp"]), size=size,
+                   n_files=n, mtime=mtime, loc=loc) for (e, p), (size, n, mtime) in zip(found, sizes)]
     return sorted(out, key=lambda d: (d.run, d.dtype, -d.mtime))
 
 
