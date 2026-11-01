@@ -3,13 +3,15 @@ another). Read by the private dashboard (and later the private simulation app an
 
     {
       "strax_folder": "/data/xenon/xams_v2/users/<you>/measurements/strax_data",
+      "mc_raw_folder": ".../xamssim/strax_data",          # optional: private MC (xams-sim): raw records + run documents
+      "mc_processed_folder": ".../xamssim/processed",     # optional: its reconstruction (provider: central_contexts.mc)
       "token": "<secret>",                      # required by the app on every request (made by ops/start_private.sh)
       "dashboard_port": 21234,                  # remote port of the private dashboard (default from the user id)
       "contexts": [                             # context providers: a data set is current if one of them makes it
         {"name": "SR2026.3", "python": "/path/to/python", "path": ".../analysis_SR2026.3/lib/xams_sr.py",
          "call": "context_for_runs", "args": [["{run}"]], "watch": [".../analysis_SR2026.3/config"]},
-        {"name": "MC", "python": "/path/to/python", "path": ".../xams_sr.py", "call": "context", "args": ["P1"],
-         "runs": [990000, 999999]},             # only these runs (simulated): see lineage_worker.py
+        {"name": "MC", "python": "/path/to/python", "path": ".../backend/common/central_contexts.py", "call": "mc",
+         "args": ["{run}", "/path/mc_raw_folder", "/path/mc_processed_folder"], "runs": [990000, 999999]},  # simulated runs only
         {"name": "central", "kind": "amstrax", "context": "xams", "config": {}}
       ],
       "max_jobs": 10,                           # Process: at most this many of your dashboard jobs in condor
@@ -39,6 +41,8 @@ class PrivateSettings:
     token: str = ""
     dashboard_port: int = field(default_factory=default_port)
     contexts: list = field(default_factory=list)
+    mc_raw_folder: Path | None = None
+    mc_processed_folder: Path | None = None
     max_jobs: int = 10
     job_memory_mb: int = 8000
     path: Path | None = None
@@ -54,4 +58,6 @@ class PrivateSettings:
         return cls(strax_folder=Path(d["strax_folder"]), token=str(d.get("token") or ""),
                    dashboard_port=int(d.get("dashboard_port") or default_port()),
                    contexts=list(d.get("contexts") or []), max_jobs=int(d.get("max_jobs") or 10),
+                   mc_raw_folder=Path(d["mc_raw_folder"]) if d.get("mc_raw_folder") else None,
+                   mc_processed_folder=Path(d["mc_processed_folder"]) if d.get("mc_processed_folder") else None,
                    job_memory_mb=int(d.get("job_memory_mb") or 8000), path=path)
