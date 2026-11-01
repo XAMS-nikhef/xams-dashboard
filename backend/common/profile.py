@@ -60,7 +60,8 @@ def current_versions() -> list:
 def production_providers(processed: Path) -> list:
     data_runs = [0, MC_RUNS[0] - 1]
     out = [{"name": v, "kind": "amstrax", "context": "xams",
-            "kwargs": {"output_folder": str(processed), "corrections_version": v}, "runs": data_runs}
+            "kwargs": {"output_folder": str(processed), "corrections_version": v, "event_structure_v2": True},
+            "runs": data_runs}
            for v in current_versions()]
     out.append({"name": "LED", "kind": "amstrax", "context": "xams_led", "kwargs": {"output_folder": str(processed)},
                 "types": ["records_led", "led_calibration"], "runs": data_runs})

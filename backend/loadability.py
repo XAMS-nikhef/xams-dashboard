@@ -17,6 +17,11 @@ TARGET_TYPES = (
     "event_info",
     "event_basics",
     "event_positions",
+    # event structure v2 (amstrax #367, optional types: registered with event_structure_v2=True)
+    "event_peaks",
+    "sites",
+    "events_v2",
+    "peak_context",
     "records_led",
     "led_calibration",
 )
@@ -132,6 +137,8 @@ def _context(corrections_version=None, led=False):
     kwargs = {"output_folder": settings.stbc_output_dir}
     if corrections_version and corrections_version != "online":
         kwargs["corrections_version"] = corrections_version
+    if not led:
+        kwargs["event_structure_v2"] = True                  # also know the optional v2 types (amstrax #367)
     factory = amstrax.contexts.xams_led if led else amstrax.contexts.xams
     st = factory(**kwargs)
     _CTX_CACHE[key] = (time.time(), st)
