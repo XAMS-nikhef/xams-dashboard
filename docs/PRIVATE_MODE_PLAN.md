@@ -51,7 +51,7 @@ The same views as for data, for the user's private simulations (xams-sim, number
 - private MC has no database entry: its run document is a file next to the raw records (`mc_raw_folder`, read via
   amstrax `RUNDOC_DIRS`, as `backend/loadability.py` does for production MC);
 - reconstruction in `mc_processed_folder`; status, plots and loadability as in the production dashboard's MC handling
-  (`for_mc_run`, corrections MC1), with the folders from the settings instead of the fixed `MC_RAW` /
+  (`for_mc_run`, corrections MC2; MC1 until 2026-11-01), with the folders from the settings instead of the fixed `MC_RAW` /
   `MC_PROCESSED`.
 
 ### 3.3 What changed

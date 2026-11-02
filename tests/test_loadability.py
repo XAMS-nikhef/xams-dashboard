@@ -63,9 +63,9 @@ def test_scan_mc_run(tmp_path, monkeypatch):
     monkeypatch.setattr(L, "MC_PROCESSED", str(proc))
     monkeypatch.setattr(L, "_storage_locations", lambda: [str(tmp_path)])
     monkeypatch.setattr(L, "_run_db_data_metadata", lambda run_id: {
-        ("raw_records", "y5oixg6qla"): {"db_corrections_version": "MC1"},
-        ("event_info", "latest1"): {"db_corrections_version": "MC1"},
-        ("event_info", "truth01"): {"db_corrections_version": "MC1"},
+        ("raw_records", "y5oixg6qla"): {"db_corrections_version": "MC2"},
+        ("event_info", "latest1"): {"db_corrections_version": "MC2"},
+        ("event_info", "truth01"): {"db_corrections_version": "MC2"},
     })
     contexts = {"latest": {"raw_records": "y5oixg6qla", "event_info": "latest1"},
                 "truth": {"raw_records": "y5oixg6qla", "event_info": "truth01"}}
@@ -87,4 +87,4 @@ def test_scan_mc_run(tmp_path, monkeypatch):
     rows = {r["dataset_dir"]: r for r in L.scan_disk_availability(900001)}
     assert set(rows) == {"900001-raw_records-y5oixg6qla", "900001-event_info-latest1", "900001-event_info-truth01"}
     assert all(r["loadable"] for r in rows.values())
-    assert rows["900001-event_info-truth01"]["reason"] == "OK: loadable with corrections MC1 (truth)"
+    assert rows["900001-event_info-truth01"]["reason"] == "OK: loadable with corrections MC2 (truth)"

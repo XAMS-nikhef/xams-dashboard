@@ -9,7 +9,7 @@ _CACHE_TTL = 60
 PROCESSED = "/data/xenon/xams_v2/xams_processed"
 MC_RAW, MC_PROCESSED = "/data/xenon/xams_v2/mc_raw_records", "/data/xenon/xams_v2/mc_processed"
 MC_RUNS = (900000, 999999)
-MC_CORRECTIONS = "MC1"
+MC_CORRECTIONS = "MC2"
 
 
 def _versions(doc: Dict[str, Any]) -> list:

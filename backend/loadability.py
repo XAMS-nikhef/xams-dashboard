@@ -54,11 +54,11 @@ def _storage_locations() -> List[str]:
     return unique
 
 
-# simulated runs (xams-sim, 900000-999999): their own folders, run documents in runs_mc, corrections MC1 with the run's
+# simulated runs (xams-sim, 900000-999999): their own folders, run documents in runs_mc, corrections MC2 with the run's
 # own values (amstrax for_mc_run: "latest", and "truth" as the kept reference)
 MC_RUNS = (900000, 999999)
 MC_RAW, MC_PROCESSED = "/data/xenon/xams_v2/mc_raw_records", "/data/xenon/xams_v2/mc_processed"
-MC_CORRECTIONS = "MC1"
+MC_CORRECTIONS = "MC2"
 
 
 def _is_mc(run_id) -> bool:

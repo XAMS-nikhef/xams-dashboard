@@ -84,7 +84,7 @@ def test_production_providers(monkeypatch, tmp_path):
     monkeypatch.setenv("XAMS_DASH_CURRENT_VERSIONS", "PROD0, v4")
     ps = production_providers(tmp_path)
     names = [p["name"] for p in ps]
-    assert names == ["PROD0", "v4", "LED", "MC (MC1)"]
+    assert names == ["PROD0", "v4", "LED", "MC (MC2)"]
     assert ps[0]["kwargs"]["corrections_version"] == "PROD0" and ps[0]["runs"] == [0, 899999]
     assert ps[2]["types"] == ["records_led", "led_calibration"]
     assert Path(ps[3]["path"]).exists() and ps[3]["runs"] == [900000, 999999]

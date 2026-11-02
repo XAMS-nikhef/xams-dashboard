@@ -65,7 +65,7 @@ def production_providers(processed: Path) -> list:
            for v in current_versions()]
     out.append({"name": "LED", "kind": "amstrax", "context": "xams_led", "kwargs": {"output_folder": str(processed)},
                 "types": ["records_led", "led_calibration"], "runs": data_runs})
-    out.append({"name": "MC (MC1)", "kind": "function", "path": str(Path(__file__).with_name("central_contexts.py")),
+    out.append({"name": "MC (MC2)", "kind": "function", "path": str(Path(__file__).with_name("central_contexts.py")),
                 "call": "mc", "args": ["{run}"], "runs": list(MC_RUNS)})
     return out
 
