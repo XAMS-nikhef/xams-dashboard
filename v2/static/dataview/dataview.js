@@ -90,11 +90,13 @@ function runMatches(r) {
 
 // The chain in its order: one column per data type in the run list (types not in it follow alphabetically).
 const CHAIN = ["raw_records", "raw_records_ext", "raw_records_sipm", "pulse_counts", "records_led", "led_calibration",
-  "peaks", "peaks_sipm", "peak_basics", "peak_positions", "events", "event_basics", "event_positions", "corrected_areas", "event_info"];
+  "peaks", "peaks_sipm", "peak_basics", "peak_positions", "events", "event_basics", "event_positions", "corrected_areas", "event_info",
+  "event_peaks", "sites", "events_v2", "peak_context"];
 const SHORT = {raw_records: "raw", raw_records_ext: "raw ext", raw_records_sipm: "raw sipm", pulse_counts: "pulses",
   records_led: "led rec", led_calibration: "led cal", peaks: "peaks", peaks_sipm: "peaks sipm", peak_basics: "pk basics",
   peak_positions: "pk pos", events: "events", event_basics: "ev basics", event_positions: "ev pos",
-  corrected_areas: "corr", event_info: "ev info"};
+  corrected_areas: "corr", event_info: "ev info", event_peaks: "ev peaks", sites: "sites", events_v2: "events v2",
+  peak_context: "pk context"};
 let CAN_SUBMIT = false, SUBMIT_OPTS = null;
 
 function bestOf(ds) {
