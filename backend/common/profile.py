@@ -47,7 +47,13 @@ class Profile:
 
 
 def private_profile(settings) -> Profile:
-    return Profile(name="private", title="private", locations=[Location(Path(settings.strax_folder), "strax_data")],
+    """The user's strax folder and, if set, the folders of their private MC (xams-sim reconstruction and raw records)."""
+    locs = [Location(Path(settings.strax_folder), "strax_data")]
+    if getattr(settings, "mc_processed_folder", None):
+        locs.append(Location(Path(settings.mc_processed_folder), "mc_processed"))
+    if getattr(settings, "mc_raw_folder", None):
+        locs.append(Location(Path(settings.mc_raw_folder), "mc_raw_records", raw=True))
+    return Profile(name="private", title="private", locations=locs,
                    state_dir=Path(settings.strax_folder), providers=list(settings.contexts), token=settings.token)
 
 

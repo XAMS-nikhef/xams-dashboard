@@ -250,3 +250,16 @@ def test_worker_shared_context_and_types(tmp_path):
                      [["007591", ["records_led", "peaks"]], ["007592", ["records_led"]]])
     assert res["hashes"]["007591"] == {"records_led": "rec1", "peaks": None}
     assert res["hashes"]["007592"] == {"records_led": "rec1"}                      # the same context: made once
+
+
+def test_private_profile_mc_folders(tmp_path):
+    import json
+    from backend.common.profile import private_profile
+    from backend.private.settings import PrivateSettings
+    p = tmp_path / "private.json"
+    p.write_text(json.dumps({"strax_folder": str(tmp_path / "s"), "mc_raw_folder": str(tmp_path / "raw"),
+                             "mc_processed_folder": str(tmp_path / "proc")}))
+    prof = private_profile(PrivateSettings.load(p))
+    assert [(l.label, l.raw) for l in prof.locations] == [("strax_data", False), ("mc_processed", False), ("mc_raw_records", True)]
+    p.write_text(json.dumps({"strax_folder": str(tmp_path / "s")}))
+    assert [l.label for l in private_profile(PrivateSettings.load(p)).locations] == ["strax_data"]
