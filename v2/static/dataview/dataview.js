@@ -2,7 +2,9 @@
 const $ = (id) => document.getElementById(id);
 const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({"&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;"}[c]));
 const STATUS_ORDER = ["current", "outdated", "incomplete", "unknown", "pending"];
-let RUNS = [], selectedRun = null, pollTimer = null, DELETABLE = null;   // DELETABLE: statuses the profile may delete (null: any)
+let RUNS = [], selectedRun = null, pollTimer = null, DELETABLE = null;
+const PAGE = 200;                                          // runs drawn at a time; "show more" adds the next page
+let shown = PAGE;   // DELETABLE: statuses the profile may delete (null: any)
 let KIND = location.hash === "#mc" ? "mc" : "data";      // the tab: data runs or simulated runs (900000-999999)
 
 function gb(b) {
@@ -18,7 +20,8 @@ function stClass(d) { return d.keep ? "st-keep" : (rawOld(d) ? "st-rawold" : "st
 function stLabel(d) {
   if (rawOld(d)) return "old reader version (raw)";
   const s = d.keep ? "keep" : d.status;
-  return d.status === "current" && d.current_for.length ? `${s} (${d.current_for.join(", ")})` : s;
+  const cf = d.current_for || [];                          // left out of the run list when empty
+  return d.status === "current" && cf.length ? `${s} (${cf.join(", ")})` : s;
 }
 
 // ------------------------------------------------------------------ feedback: busy indicator, messages
@@ -115,7 +118,8 @@ function jobText(r) {
 }
 
 function renderRuns() {
-  const runs = RUNS.filter(runMatches);
+  const matching = RUNS.filter(runMatches);
+  const runs = matching.slice(0, Math.max(shown, matching.findIndex((r) => r.run === selectedRun) + 1));
   const cols = typeColumns(runs);
   $("runsHead").innerHTML = "<tr>" + (CAN_SUBMIT ? `<th><input type="checkbox" id="runSelAll" title="select all shown"></th>` : "")
     + "<th>run</th><th>mode / source</th><th>start</th><th>job</th>"
@@ -145,6 +149,14 @@ function renderRuns() {
       + `<td class="nowrap" title="${esc(day(i.start))}">${esc(day(i.start).slice(5))}</td><td>${jobText(r)}</td>${cells}<td class="nowrap">${gb(r.size)}${nOld ? `<br><span class="${r.outdated_size ? "bad" : "hint"}" title="${nOld} older versions, ${gb(sizeOld)}">+${nOld} old</span>` : ""}</td>`;
     tr.onclick = (e) => { if (!e.target.classList.contains("runSel")) selectRun(r.run); };
     tb.appendChild(tr);
+  }
+  if (matching.length > runs.length) {
+    const tr = document.createElement("tr");
+    const n = Math.min(PAGE, matching.length - runs.length);
+    tr.innerHTML = `<td colspan="${cols.length + 6}"><button class="small" id="moreRuns">show ${n} more</button>`
+      + ` <span class="hint">${runs.length} of ${matching.length} runs shown</span></td>`;
+    tb.appendChild(tr);
+    $("moreRuns").onclick = () => { shown = runs.length + PAGE; renderRuns(); };
   }
   const all = $("runSelAll");
   if (all) all.onchange = (e) => { document.querySelectorAll(".runSel").forEach((c) => (c.checked = e.target.checked)); updateRunSel(); };
@@ -495,9 +507,10 @@ function setKind(k) {
 }
 document.querySelectorAll(".nav-link[data-kind]").forEach((a) => (a.onclick = (e) => { e.preventDefault(); history.replaceState(null, "", "#" + a.dataset.kind); setKind(a.dataset.kind); }));
 document.querySelectorAll(".nav-link[data-kind]").forEach((a) => a.classList.toggle("active", a.dataset.kind === KIND));
-$("search").oninput = renderRuns;
-for (const id of ["srFilter", "classFilter", "sourceFilter"]) $(id).onchange = renderRuns;
-$("statusFilter").onchange = renderRuns;
+const refilter = () => { shown = PAGE; renderRuns(); };   // a new filter starts again at the first page
+$("search").oninput = refilter;
+for (const id of ["srFilter", "classFilter", "sourceFilter"]) $(id).onchange = refilter;
+$("statusFilter").onchange = refilter;
 $("refreshBtn").onclick = async () => {
   const done = busy("Starting the status computation…");
   try { await api("/api/refresh", {}); toast("Status is being recomputed in the background (status 'pending' until done).", "info"); }
