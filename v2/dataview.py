@@ -8,6 +8,7 @@ its providers, "why?", plots of any stored version, keep marks and deletion. One
 from __future__ import annotations
 
 import getpass
+import gzip
 import json
 import os
 import shutil
@@ -16,7 +17,7 @@ import time
 from datetime import datetime
 from pathlib import Path
 
-from flask import Blueprint, jsonify, render_template, request
+from flask import Blueprint, Response, jsonify, render_template, request
 
 from backend.common import folder as F
 from backend.common import stored
@@ -30,6 +31,7 @@ JOBS_TTL = 20                     # seconds the condor / waiting-list state is r
 SCAN_TTL = 60                     # seconds a folder scan is reused before a new one starts (in the background)
 # what the run list needs per data set (the run panel fetches the full rows with /api/run/<run>)
 LIST_FIELDS = ("id", "dtype", "hash", "status", "current_for", "keep", "size", "raw", "temp")
+LIST_SKIP_EMPTY = ("current_for", "keep", "raw", "temp")  # left out of the list when false / empty (most data sets)
 PLOT_FIELDS = {
     "event": ["s1_area", "s2_area", "cs1", "cs2", "drift_time", "x", "y", "s1_area_fraction_top"],
     "peak": ["area", "area_fraction_top", "range_50p_area", "type"],
@@ -38,6 +40,10 @@ PLOT_FIELDS = {
 
 def _iso(v):
     return v.isoformat() if isinstance(v, datetime) else v
+
+
+def _json_default(v):
+    return v.isoformat() if isinstance(v, datetime) else str(v)
 
 
 class DataView:
@@ -52,6 +58,7 @@ class DataView:
         self._scan_lock = threading.Lock()
         self._scanning = False
         self._jobs = (0.0, {})
+        self._runs_json: dict = {}               # kind -> (key, time, json bytes, gzipped bytes) of /api/runs
 
     def jobs(self) -> dict:
         """Job state per run (condor / waiting list) from the profile, cached JOBS_TTL seconds."""
@@ -80,6 +87,11 @@ class DataView:
             self._scan_now()
         finally:
             self._scanning = False
+        try:                                                     # the rows of the new scan, before a page asks
+            for kind in ("data", "mc"):
+                self.rows(kind)
+        except Exception:                                        # noqa: BLE001 (computed on request then)
+            pass
 
     def datasets_raw(self) -> list:
         """The data sets of all locations: the last scan, renewed in the background when older than SCAN_TTL. The
@@ -296,10 +308,8 @@ def blueprint(profile, base: str = "") -> Blueprint:
                                locations=[str(x.path) for x in profile.locations],
                                providers=[provider_name(p, i) for i, p in enumerate(profile.providers)])
 
-    @bp.get("/api/runs")
-    def runs():
-        """?kind=data (runs below 900000) or mc (simulated runs 900000-999999); totals for that kind."""
-        rows = view.rows(request.args.get("kind"))
+    def _runs_payload(kind) -> dict:
+        rows = view.rows(kind)
         by_run: dict = {}
         for r in rows:
             by_run.setdefault(r["run"], []).append(r)
@@ -308,14 +318,33 @@ def blueprint(profile, base: str = "") -> Blueprint:
         out = []
         for run in sorted(by_run, reverse=True):
             ds = by_run[run]
-            slim = [{k: d[k] for k in LIST_FIELDS if k in d} for d in ds]
+            slim = [{k: d[k] for k in LIST_FIELDS if k in d and not (k in LIST_SKIP_EMPTY and not d[k])} for d in ds]
             out.append({"run": run, "info": info.get(run, {}), "job": jobs.get(run, ""), "size": sum(d["size"] for d in ds),
                         "outdated_size": sum(d["size"] for d in ds if d["status"] in ("outdated", "incomplete")
                                              and not d["keep"]),
                         "datasets": slim})
-        return jsonify({"runs": out, "totals": _totals(rows), "lineage": view.lineage.state,
-                        "scanning": not view._scan[0], "can_submit": bool(profile.submit),
-                        "delete_statuses": sorted(profile.delete_statuses) if profile.delete_statuses else None})
+        return {"runs": out, "totals": _totals(rows), "lineage": view.lineage.state,
+                "scanning": not view._scan[0], "can_submit": bool(profile.submit),
+                "delete_statuses": sorted(profile.delete_statuses) if profile.delete_statuses else None}
+
+    @bp.get("/api/runs")
+    def runs():
+        """?kind=data (runs below 900000) or mc (simulated runs 900000-999999); totals for that kind. The list holds
+        ~10k data sets: the serialized answer is reused while rows and jobs are unchanged (ROWS_TTL) and sent gzipped."""
+        kind = request.args.get("kind")
+        rows = view.rows(kind)
+        key = (id(rows), view._jobs[0], bool(view._scan[0]))
+        hit = view._runs_json.get(kind)
+        if not (hit and hit[0] == key and time.time() - hit[1] < ROWS_TTL):
+            body = json.dumps(_runs_payload(kind), default=_json_default, separators=(",", ":")).encode()
+            hit = (key, time.time(), body, gzip.compress(body, compresslevel=5))
+            view._runs_json[kind] = hit
+        gz = "gzip" in request.headers.get("Accept-Encoding", "")
+        resp = Response(hit[3] if gz else hit[2], mimetype="application/json")
+        if gz:
+            resp.headers["Content-Encoding"] = "gzip"
+        resp.headers["Vary"] = "Accept-Encoding"
+        return resp
 
     @bp.get("/api/run/<int:run>")
     def run_detail(run: int):

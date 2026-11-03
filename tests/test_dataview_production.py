@@ -160,3 +160,16 @@ def test_deleted_gone_from_list_at_once(view):
     assert any(r["id"] == "007720-peak_positions-oldoldoldo" for r in view.rows())
     view.delete(["007720-peak_positions-oldoldoldo"], confirm=True)
     assert not any(r["id"] == "007720-peak_positions-oldoldoldo" for r in view.rows())     # no stale row
+
+
+def test_runs_list_slim_and_gzipped(view):
+    import gzip
+    import json
+    c = _client(view)
+    plain = c.get("/api/runs").get_json()
+    ds = {d["id"]: d for r in plain["runs"] for d in r["datasets"]}
+    kept = next(d for i, d in ds.items() if "keptkeptke" in i)
+    old = next(d for i, d in ds.items() if "oldoldoldo" in i)
+    assert kept["keep"] is True and "keep" not in old and "temp" not in old     # false / empty fields left out
+    r = c.get("/api/runs", headers={"Accept-Encoding": "gzip"})
+    assert r.headers["Content-Encoding"] == "gzip" and json.loads(gzip.decompress(r.data)) == plain
