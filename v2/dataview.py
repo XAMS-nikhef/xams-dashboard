@@ -59,6 +59,7 @@ class DataView:
         self._scanning = False
         self._jobs = (0.0, {})
         self._runs_json: dict = {}               # kind -> (key, time, json bytes, gzipped bytes) of /api/runs
+        self._lineage_for = None                 # (scan time, lineage version) the lineage was last started for
 
     def jobs(self) -> dict:
         """Job state per run (condor / waiting list) from the profile, cached JOBS_TTL seconds."""
@@ -207,7 +208,12 @@ class DataView:
     def rows(self, kind: str | None = None) -> list:
         """The data sets with status (cached ROWS_TTL s; a new scan, new hashes, keep marks or a deletion renew it)."""
         ds = self.datasets_raw()
-        self.lineage.start(ds)                                   # compute what is missing (background, no-op if done)
+        # compute what is missing (background); finding out what is missing takes ~1 s for 10k data sets, so only
+        # once per scan / lineage version, not on every request
+        started_for = (self._scan[0], self.lineage.version)
+        if started_for != self._lineage_for:
+            self._lineage_for = started_for
+            self.lineage.start(ds)
         key = (self._scan[0], self.lineage.version, self._keep_mtime(), len(ds))
         hit = self._rows.get(kind)
         if hit and hit[0] == key and time.time() - hit[1] < ROWS_TTL:
