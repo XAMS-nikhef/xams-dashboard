@@ -40,6 +40,11 @@ class Profile:
     on_delete: Callable | None = None                 # (dataset, location) -> note, after a data set is deleted
     links: list = field(default_factory=list)         # [(label, url)] in the page header
     min_run: int = 0                                  # runs below it are not shown
+    # deletion guards (production): an outdated data set (not raw) only when the same run has a current one of the
+    # same type (a wrong current-versions setting makes everything "outdated"); one action at most this fraction of
+    # the data sets / bytes (not raw) unless confirmed separately (None: no limit)
+    require_current: bool = False
+    bulk_limit: float | None = None
     # processing (set by the app that hosts the page; None: no Process button)
     submit: Callable | None = None                    # (run_ids, targets, corrections_version) -> result dict
     submit_options: Callable | None = None            # () -> {targets, corrections_versions, default_version, ...}
@@ -109,6 +114,6 @@ def production_profile() -> Profile:
     return Profile(name="production", title="v3 (trial)", locations=[x for x in locs if x.path.is_dir()],
                    state_dir=Path(os.environ.get("XAMS_DASH_STATE_DIR", XAMS / "dashboard_state")),
                    providers=production_providers(processed), delete_statuses=frozenset({"outdated", "incomplete"}),
-                   raw_rule=_live_on_stbc, on_delete=_remove_data_entry,
+                   raw_rule=_live_on_stbc, on_delete=_remove_data_entry, require_current=True, bulk_limit=0.05,
                    links=[("Old dashboard", "/"), ("Corrections", "/corrections"), ("Admin", "/admin")],
                    min_run=int(os.environ.get("XAMS_DASH_V3_MIN_RUN", "6000")))     # as the online processing

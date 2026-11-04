@@ -271,9 +271,27 @@ class DataView:
         return self._rows_compute(self.scan_run(run), None)
 
     # -------------------------------------------------------------------------------------------- deletion
-    def delete(self, ids: list, confirm: bool = False) -> dict:
-        """Preview (confirm False) or delete data sets under the profile's rules; every deletion logged."""
-        status = {r["id"]: r for r in self.rows()}
+    def _large(self, ok, rows) -> dict | None:
+        """Whether a deletion touches more than bulk_limit of the data sets or bytes (raw records not counted)."""
+        if not self.p.bulk_limit:
+            return None
+        base = [r for r in rows if not r["raw"]]
+        mine = [x for d, x in ok if not (self.location(d).raw or d.dtype in RAW_TYPES)]
+        n_all, s_all = len(base), sum(r["size"] for r in base)
+        f_n = len(mine) / n_all if n_all else 0.0
+        f_s = sum(x["size"] for x in mine) / s_all if s_all else 0.0
+        if max(f_n, f_s) <= self.p.bulk_limit:
+            return None
+        return {"fraction_datasets": round(f_n, 4), "fraction_size": round(f_s, 4), "limit": self.p.bulk_limit,
+                "message": f"This would delete {100 * f_n:.1f} % of the data sets / {100 * f_s:.1f} % of the bytes "
+                           f"(limit {100 * self.p.bulk_limit:.0f} %)."}
+
+    def delete(self, ids: list, confirm: bool = False, allow_large: bool = False) -> dict:
+        """Preview (confirm False) or delete data sets under the profile's rules; every deletion logged. An action
+        above the profile's bulk_limit is refused as a whole unless allow_large (the page asks separately)."""
+        all_rows = self.rows()
+        status = {r["id"]: r for r in all_rows}
+        current = {(r["run"], r["dtype"]) for r in all_rows if r["status"] == "current"}
         keep = F.load_keep(self.p.state_dir)
         ok, refused = [], []
         for ds_id in dict.fromkeys(ids):
@@ -289,6 +307,9 @@ class DataView:
                 reason = "marked keep"
             if reason is None and self.p.delete_statuses is not None and row["status"] not in self.p.delete_statuses:
                 reason = f"{self.p.name}: only {' / '.join(sorted(self.p.delete_statuses))} data sets ({row['status']})"
+            if (reason is None and self.p.require_current and not raw and row["status"] == "outdated"
+                    and (d.run, d.dtype) not in current):
+                reason = "no current version of this data type for the run (check the current versions setting)"
             if reason is None and raw and self.p.raw_rule:
                 reason = self.p.raw_rule(d)
             if reason:
@@ -300,7 +321,13 @@ class DataView:
             ok.append((d, item))
         out = {"confirm": bool(confirm), "delete": [x for _, x in ok], "refused": refused,
                "size": sum(x["size"] for _, x in ok), "deleted": [], "errors": []}
+        large = self._large(ok, all_rows)
+        if large:
+            out["large"] = large
         if not confirm:
+            return out
+        if large and not allow_large:
+            out["errors"].append({"name": "*", "error": large["message"] + " Nothing deleted."})
             return out
         self.p.state_dir.mkdir(parents=True, exist_ok=True)
         log = self.p.state_dir / F.LOG_FILE
@@ -493,7 +520,8 @@ def blueprint(profile, base: str = "") -> Blueprint:
     def delete():
         """{"names": [ids], "confirm": false} -> preview; with confirm true: delete under the profile's rules."""
         b = request.get_json(force=True, silent=True) or {}
-        return jsonify(view.delete([str(x) for x in (b.get("names") or [])][:5000], confirm=bool(b.get("confirm"))))
+        return jsonify(view.delete([str(x) for x in (b.get("names") or [])][:5000], confirm=bool(b.get("confirm")),
+                                   allow_large=bool(b.get("allow_large"))))
 
     @bp.post("/api/delete-outdated")
     def delete_outdated():
