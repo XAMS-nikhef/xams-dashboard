@@ -260,7 +260,8 @@ async function loadRunDoc(run) {
 
 async function loadRuns() {
   try {
-    const j = await api("/api/runs?kind=" + KIND);
+    const [j, jobs] = await Promise.all([api("/api/runs?kind=" + KIND), api("/api/jobs").catch(() => ({}))]);
+    for (const r of j.runs) r.job = jobs[r.run] || "";
     RUNS = j.runs;
     DELETABLE = j.delete_statuses;
     CAN_SUBMIT = !!j.can_submit;

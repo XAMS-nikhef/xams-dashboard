@@ -167,12 +167,13 @@ class Lineage:
         """[(provider index, fingerprint, {run6: [dtypes]})]: current lineages still missing for outdated data sets
         (of every provider that makes the data type for the run)."""
         out = {}
+        fps = self.fingerprints()
         for d in datasets:
-            if self.status(d)["status"] != "outdated":
+            if self.status(d, fps)["status"] != "outdated":
                 continue
             run = f"{d.run:06d}"
             for i, p in enumerate(self.providers):
-                fp = fingerprint(p)
+                fp = fps[i]
                 entry = self.cache.get(fp) or {}
                 if (entry.get("hashes", {}).get(run) or {}).get(d.dtype) is None:
                     continue
@@ -254,13 +255,19 @@ class Lineage:
                 with self._lock:
                     self._save()
 
-    def status(self, d) -> dict:
-        """Status of one data set (module doc) and the providers that make it now."""
+    def fingerprints(self) -> list:
+        """The providers' fingerprints, in order (pass to status() when asking for many data sets at once)."""
+        return [fingerprint(p) for p in self.providers]
+
+    def status(self, d, fps: list | None = None) -> dict:
+        """Status of one data set (module doc) and the providers that make it now. `fps`: fingerprints() computed
+        once by the caller (a fingerprint costs a json dump of the provider; 10k data sets x 7 providers ~1 s)."""
         if d.temp:
             return {"status": "incomplete", "current_for": []}
+        fps = fps or self.fingerprints()
         run, pending, current, made = f"{d.run:06d}", False, [], False
         for i, p in enumerate(self.providers):
-            entry = self.cache.get(fingerprint(p))
+            entry = self.cache.get(fps[i])
             h = ((entry or {}).get("hashes", {}).get(run) or {})
             if d.dtype not in h:
                 pending = True
