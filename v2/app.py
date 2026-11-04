@@ -1,9 +1,15 @@
 from __future__ import annotations
 
+import logging
 import math
 import os
+import re
 from datetime import datetime
-from flask import Flask, jsonify, render_template, request, redirect
+from urllib.parse import urlencode
+
+from flask import Flask, jsonify, make_response, render_template, request, redirect
+
+from backend.common import keys as K
 
 from backend.deletion_service import delete_run_disk_data
 from backend.events_loader import load_event_features
@@ -14,6 +20,45 @@ from backend.config import settings
 from backend.submit_queue import SubmitQueue
 
 app = Flask(__name__, template_folder='templates', static_folder='static')
+
+
+# Actions (POST) need a user's key (backend/common/keys.py); reading does not. The key comes once as ?key=... (the
+# launcher), is kept as a cookie and dropped from the address.
+class _HideKey(logging.Filter):
+    """The request log must not show the key."""
+    def filter(self, record):
+        record.msg = re.sub(r"key=[^\s&\"]+", "key=***", str(record.msg))
+        if record.args:
+            record.args = tuple(re.sub(r"key=[^\s&\"]+", "key=***", a) if isinstance(a, str) else a
+                                for a in record.args)
+        return True
+
+
+logging.getLogger("werkzeug").addFilter(_HideKey())
+
+
+@app.before_request
+def _key_from_url():
+    v = request.args.get("key")
+    if request.method == "GET" and v:
+        args = {k: x for k, x in request.args.items() if k != "key"}
+        resp = make_response(redirect(request.path + ("?" + urlencode(args) if args else ""), code=302))
+        if K.user_for(v):
+            resp.set_cookie(K.COOKIE, v, httponly=True, samesite="Strict", max_age=30 * 24 * 3600)
+        resp.headers["Cache-Control"] = "no-store"
+        resp.headers["Referrer-Policy"] = "no-referrer"
+        return resp
+    return None
+
+
+@app.before_request
+def _check_key():
+    if request.method in ("GET", "HEAD", "OPTIONS"):
+        return None
+    if K.user_for(request.cookies.get(K.COOKIE)) or K.user_for(request.headers.get("X-Key")):
+        return None
+    return jsonify({"error": "forbidden: actions need your dashboard key; open the dashboard through the launcher "
+                             "(see backend/common/keys.py)"}), 403
 
 # The new data view (docs/UNIFIED_DASHBOARD_REPORT.md) on trial at /v3, next to this page; XAMS_DASH_V3=0 switches it
 # off. Shared with the private dashboard (v2/dataview.py, profile "production").

@@ -412,9 +412,15 @@ async function runDelete(title, previewFn) {
   try { pv = await previewFn(); } catch (e) { toast("Could not make the list: " + esc(e.message), "bad"); done(); return; }
   done();
   if (!(await confirmDialog(title, pv))) { toast("Nothing deleted (cancelled).", "info", 4000); return; }
+  if (pv.large) {                                          // a big share of all data: typed confirmation
+    const n = String(pv.delete.length);
+    const typed = window.prompt(`${pv.large.message}\nA wrong "current versions" setting can make current data look outdated.`
+      + `\n\nType the number of data sets (${n}) to delete them anyway:`);
+    if (typed !== n) { toast("Nothing deleted (not confirmed).", "info", 4000); return; }
+  }
   done = busy(`Deleting ${pv.delete.length} data set${pv.delete.length === 1 ? "" : "s"} (${gb(pv.size)})…`);
   try {
-    const res = await api("/api/delete", {names: pv.delete.map((x) => x.name), confirm: true});
+    const res = await api("/api/delete", {names: pv.delete.map((x) => x.name), confirm: true, allow_large: !!pv.large});
     const n = res.deleted.length;
     toast(`Deleted ${n} data set${n === 1 ? "" : "s"} (${gb(pv.delete.filter((x) => res.deleted.includes(x.name)).reduce((a, x) => a + x.size, 0))})`
       + (res.errors.length ? `; <b>${res.errors.length} errors</b>: ` + res.errors.slice(0, 3).map((e) => esc(e.name + ": " + e.error)).join("; ") : ""),
