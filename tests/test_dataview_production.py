@@ -112,7 +112,9 @@ def _client(view, **hooks):
     bp.view.rundocs = lambda runs: {r: {"processing": "done"} for r in runs}
     app = Flask("t", template_folder=str(Path(DV.__file__).parent / "templates"))
     app.register_blueprint(bp)
-    return app.test_client()
+    c = app.test_client()
+    c.dv = bp.view
+    return c
 
 
 def test_submit_through_host_app(view):
@@ -122,7 +124,8 @@ def test_submit_through_host_app(view):
                                         "default_version": "PROD0"},
                 jobs=lambda: {7720: "running"})
     j = c.get("/api/runs").get_json()
-    assert j["can_submit"] and next(r for r in j["runs"] if r["run"] == 7720)["job"] == "running"
+    assert j["can_submit"] and "job" not in j["runs"][0]                 # job states: /api/jobs (change every 20 s)
+    assert c.get("/api/jobs").get_json() == {"7720": "running"}
     o = c.get("/api/submit-options").get_json()
     assert o["enabled"] and o["default_version"] == "PROD0"
     r = c.post("/api/submit", json={"run_ids": [7720], "targets": ["event_info"], "corrections_version": "v4"}).get_json()
@@ -173,3 +176,26 @@ def test_runs_list_slim_and_gzipped(view):
     assert kept["keep"] is True and "keep" not in old and "temp" not in old     # false / empty fields left out
     r = c.get("/api/runs", headers={"Accept-Encoding": "gzip"})
     assert r.headers["Content-Encoding"] == "gzip" and json.loads(gzip.decompress(r.data)) == plain
+
+
+
+def test_rows_not_rebuilt_by_unchanged_rescan(view):
+    rows = view.rows()
+    view._scan_now()                                                       # a rescan that finds the same folders
+    assert view.rows() is rows                                             # same rows: nothing rebuilt
+    view._scan = (view._scan[0] + 1, view._scan[1][1:])                    # a data set gone
+    assert view.rows() is not rows and len(view.rows()) == len(rows) - 1
+
+
+def test_panel_from_disk_not_from_scan(view, tmp_path):
+    view.rows()
+    _ds(tmp_path / "processed", "007720-peak_basics-newnewnewn")           # written after the last scan
+    ids = {r["id"] for r in view.run_rows(7720)}
+    assert "007720-peak_basics-newnewnewn" in ids and "1:007720-raw_records-rawrawrawr" in ids
+    assert "007721-raw_records-rawrawrawr" not in {r["id"].split(":")[-1] for r in view.run_rows(7720)}
+
+
+def test_find_without_scan(view):
+    view.datasets_raw = lambda: (_ for _ in ()).throw(AssertionError("find must not scan"))
+    d = view.find("1:007720-raw_records-rawrawrawr")
+    assert d.run == 7720 and d.loc == 1 and d.n_files == 1

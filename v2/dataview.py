@@ -26,9 +26,11 @@ from backend.common.lineage import Lineage, provider_name
 from backend.common.profile import MC_RUNS, NEVER_TYPES, RAW_TYPES
 
 RUNDOC_TTL = 600
-ROWS_TTL = 15                     # seconds the data-set rows are reused (cleared by a scan, the status, keep, delete)
 JOBS_TTL = 20                     # seconds the condor / waiting-list state is reused
 SCAN_TTL = 60                     # seconds a folder scan is reused before a new one starts (in the background)
+RUNDOC_PROJ = {"number": 1, "mode": 1, "start": 1, "end": 1, "xams_bookkeeping": 1, "tags": 1, "comments": 1,
+               "processing_status": 1, "_id": 0}
+
 # what the run list needs per data set (the run panel fetches the full rows with /api/run/<run>)
 LIST_FIELDS = ("id", "dtype", "hash", "status", "current_for", "keep", "size", "raw", "temp")
 LIST_SKIP_EMPTY = ("current_for", "keep", "raw", "temp")  # left out of the list when false / empty (most data sets)
@@ -46,6 +48,20 @@ def _json_default(v):
     return v.isoformat() if isinstance(v, datetime) else str(v)
 
 
+def _info(d) -> dict:
+    """Short run information of a run document (the list and the run panel)."""
+    xb = d.get("xams_bookkeeping") or {}
+    com = d.get("comments") or []
+    last = com[-1].get("comment", "") if com and isinstance(com[-1], dict) else ""
+    ps = d.get("processing_status")
+    return {"mode": d.get("mode") or "", "start": _iso(d.get("start")), "end": _iso(d.get("end")),
+            "source": xb.get("source_type") or "", "run_class": xb.get("run_class") or "",
+            "science_run": xb.get("science_run_id") or "",
+            "tags": [t.get("name") if isinstance(t, dict) else str(t) for t in d.get("tags") or []],
+            "comment": str(last)[:200],
+            "processing": ps.get("status", "") if isinstance(ps, dict) else str(ps or "")}
+
+
 class DataView:
     def __init__(self, profile):
         self.p = profile
@@ -58,8 +74,9 @@ class DataView:
         self._scan_lock = threading.Lock()
         self._scanning = False
         self._jobs = (0.0, {})
-        self._runs_json: dict = {}               # kind -> (key, time, json bytes, gzipped bytes) of /api/runs
-        self._lineage_for = None                 # (scan time, lineage version) the lineage was last started for
+        self._runs_json: dict = {}               # kind -> (key, json bytes, gzipped bytes) of /api/runs
+        self._lineage_for = None                 # (list signature, lineage version) the lineage was last started for
+        self._scan_sig = (None, 0)               # (scan time, content signature) of the last folder scan
 
     def jobs(self) -> dict:
         """Job state per run (condor / waiting list) from the profile, cached JOBS_TTL seconds."""
@@ -118,16 +135,38 @@ class DataView:
         return self.p.locations[d.loc]
 
     def find(self, ds_id: str):
+        """The data set folder of an id, read from disk (no scan: one folder)."""
         loc, name = F.split_id(ds_id)
         if not (0 <= loc < len(self.p.locations)):
             raise ValueError("unknown location")
-        F._target(self.p.locations[loc].path, name)              # name pattern, inside the folder, a real folder
-        d = next((x for x in self.datasets_raw() if x.loc == loc and x.name == name), None)
-        if d is None:                                            # newer than the last scan
-            d = next((x for x in F.scan(self.p.locations[loc].path, loc=loc) if x.name == name), None)
-        if d is None:
-            raise ValueError("no such data set")
-        return d
+        p = F._target(self.p.locations[loc].path, name)          # name pattern, inside the folder, a real folder
+        return self._dataset_at(p, loc)
+
+    @staticmethod
+    def _dataset_at(path: Path, loc: int):
+        m = F.parse(path.name)
+        size, n, mtime = F._size(path)
+        return F.DataSet(name=path.name, run=int(m["run"]), dtype=m["dtype"], hash=m["hash"], temp=bool(m["temp"]),
+                         size=size, n_files=n, mtime=mtime, loc=loc)
+
+    def scan_run(self, run: int) -> list:
+        """The data sets of one run in all locations, from disk (one listing per location, sizes of that run only)."""
+        out = []
+        for i, loc in enumerate(self.p.locations):
+            try:
+                for p in sorted(Path(loc.path).glob(f"{run:06d}-*")):
+                    if F.parse(p.name) and p.is_dir() and not p.is_symlink():
+                        out.append(self._dataset_at(p, i))
+            except OSError:
+                continue
+        return out
+
+    def _list_signature(self) -> object:
+        """Changes only when the folders' content changes (not with every rescan), so rows are rebuilt only then."""
+        t = self._scan[0]
+        if self._scan_sig[0] != t:
+            self._scan_sig = (t, hash(tuple((d.loc, d.name, d.size, d.mtime) for d in self._scan[1])))
+        return self._scan_sig[1]
 
     # -------------------------------------------------------------------------------------------- run information
     def rundocs(self, runs) -> dict:
@@ -139,24 +178,12 @@ class DataView:
             try:
                 import amstrax  # type: ignore
                 found = {}
-                proj = {"number": 1, "mode": 1, "start": 1, "end": 1, "xams_bookkeeping": 1, "tags": 1, "comments": 1,
-                        "processing_status": 1, "_id": 0}
                 for mc, part in ((False, [r for r in need if r < MC_RUNS[0]]), (True, [r for r in need if r >= MC_RUNS[0]])):
                     if not part:
                         continue
                     coll = amstrax.get_mongo_collection("xams_mc" if mc else "xams")
-                    for d in coll.find({"number": {"$in": part}}, proj):
-                        xb = d.get("xams_bookkeeping") or {}
-                        com = d.get("comments") or []
-                        last = com[-1].get("comment", "") if com and isinstance(com[-1], dict) else ""
-                        found[d["number"]] = {
-                            "mode": d.get("mode") or "", "start": _iso(d.get("start")), "end": _iso(d.get("end")),
-                            "source": xb.get("source_type") or "", "run_class": xb.get("run_class") or "",
-                            "science_run": xb.get("science_run_id") or "",
-                            "tags": [t.get("name") if isinstance(t, dict) else str(t) for t in d.get("tags") or []],
-                            "comment": str(last)[:200],
-                            "processing": (d.get("processing_status") or {}).get("status", "")
-                            if isinstance(d.get("processing_status"), dict) else str(d.get("processing_status") or "")}
+                    for d in coll.find({"number": {"$in": part}}, RUNDOC_PROJ):
+                        found[d["number"]] = _info(d)
                 for r in need:
                     self._rundocs[r] = (now, found.get(r, {}))
             except Exception as e:                               # noqa: BLE001 (no database: folder view only)
@@ -206,36 +233,42 @@ class DataView:
             return 0.0
 
     def rows(self, kind: str | None = None) -> list:
-        """The data sets with status (cached ROWS_TTL s; a new scan, new hashes, keep marks or a deletion renew it)."""
+        """The data sets of the run list with status. Rebuilt only when something changed: the folders' content (a
+        rescan that finds the same folders changes nothing), the hashes (lineage version), keep marks or a deletion."""
         ds = self.datasets_raw()
-        # compute what is missing (background); finding out what is missing takes ~1 s for 10k data sets, so only
-        # once per scan / lineage version, not on every request
-        started_for = (self._scan[0], self.lineage.version)
+        sig = self._list_signature()
+        # compute what is missing (background): only once per list / lineage version, not on every request
+        started_for = (sig, self.lineage.version)
         if started_for != self._lineage_for:
             self._lineage_for = started_for
             self.lineage.start(ds)
-        key = (self._scan[0], self.lineage.version, self._keep_mtime(), len(ds))
+        key = (sig, self.lineage.version, self._keep_mtime(), len(ds))
         hit = self._rows.get(kind)
-        if hit and hit[0] == key and time.time() - hit[1] < ROWS_TTL:
-            return hit[2]
+        if hit and hit[0] == key:
+            return hit[1]
         out = self._rows_compute(ds, kind)
-        self._rows[kind] = (key, time.time(), out)
+        self._rows[kind] = (key, out)
         return out
 
     def _rows_compute(self, ds, kind) -> list:
         keep = F.load_keep(self.p.state_dir)
+        fps = self.lineage.fingerprints()
         out = []
         for d in ds:
             if kind in ("data", "mc") and (MC_RUNS[0] <= d.run <= MC_RUNS[1]) != (kind == "mc"):
                 continue
             row = F.as_dict(d)
-            row.update(self.lineage.status(d), keep=d.id in keep, keep_note=(keep.get(d.id) or {}).get("note", ""),
+            row.update(self.lineage.status(d, fps), keep=d.id in keep, keep_note=(keep.get(d.id) or {}).get("note", ""),
                        location=self.location(d).label, raw=self.location(d).raw or d.dtype in RAW_TYPES)
             if row["status"] == "outdated":
                 w = self.why(d)
                 row["why_labels"], row["why_pending"] = (w["labels"], False) if w else ([], True)
             out.append(row)
         return out
+
+    def run_rows(self, run: int) -> list:
+        """The run panel: the run's data sets as they are on disk now (status, why), not from the last scan."""
+        return self._rows_compute(self.scan_run(run), None)
 
     # -------------------------------------------------------------------------------------------- deletion
     def delete(self, ids: list, confirm: bool = False) -> dict:
@@ -320,41 +353,47 @@ def blueprint(profile, base: str = "") -> Blueprint:
         for r in rows:
             by_run.setdefault(r["run"], []).append(r)
         info = view.rundocs(sorted(by_run))
-        jobs = view.jobs()
         out = []
         for run in sorted(by_run, reverse=True):
             ds = by_run[run]
             slim = [{k: d[k] for k in LIST_FIELDS if k in d and not (k in LIST_SKIP_EMPTY and not d[k])} for d in ds]
-            out.append({"run": run, "info": info.get(run, {}), "job": jobs.get(run, ""), "size": sum(d["size"] for d in ds),
+            out.append({"run": run, "info": info.get(run, {}), "size": sum(d["size"] for d in ds),
                         "outdated_size": sum(d["size"] for d in ds if d["status"] in ("outdated", "incomplete")
                                              and not d["keep"]),
                         "datasets": slim})
-        return {"runs": out, "totals": _totals(rows), "lineage": view.lineage.state,
-                "scanning": not view._scan[0], "can_submit": bool(profile.submit),
+        return {"runs": out, "totals": _totals(rows), "lineage": view.lineage.state, "scanning": not view._scan[0],
+                "can_submit": bool(profile.submit),
                 "delete_statuses": sorted(profile.delete_statuses) if profile.delete_statuses else None}
 
     @bp.get("/api/runs")
     def runs():
         """?kind=data (runs below 900000) or mc (simulated runs 900000-999999); totals for that kind. The list holds
-        ~10k data sets: the serialized answer is reused while rows and jobs are unchanged (ROWS_TTL) and sent gzipped."""
+        ~10k data sets: the serialized answer is reused while the rows are unchanged and sent gzipped. Job states are
+        not in it (they change every JOBS_TTL s): /api/jobs."""
         kind = request.args.get("kind")
         rows = view.rows(kind)
-        key = (id(rows), view._jobs[0], bool(view._scan[0]))
+        key = (id(rows), bool(view._scan[0]), view.lineage.state.get("running"))
         hit = view._runs_json.get(kind)
-        if not (hit and hit[0] == key and time.time() - hit[1] < ROWS_TTL):
+        if not (hit and hit[0] == key):
             body = json.dumps(_runs_payload(kind), default=_json_default, separators=(",", ":")).encode()
-            hit = (key, time.time(), body, gzip.compress(body, compresslevel=5))
+            hit = (key, body, gzip.compress(body, compresslevel=5))
             view._runs_json[kind] = hit
         gz = "gzip" in request.headers.get("Accept-Encoding", "")
-        resp = Response(hit[3] if gz else hit[2], mimetype="application/json")
+        resp = Response(hit[2] if gz else hit[1], mimetype="application/json")
         if gz:
             resp.headers["Content-Encoding"] = "gzip"
         resp.headers["Vary"] = "Accept-Encoding"
         return resp
 
+    @bp.get("/api/jobs")
+    def jobs():
+        """{run: job state} (condor / waiting list), small; the page fetches it next to /api/runs."""
+        return jsonify({str(k): v for k, v in view.jobs().items()})
+
     @bp.get("/api/run/<int:run>")
     def run_detail(run: int):
-        rows = [r for r in view.rows() if r["run"] == run]
+        """The run panel: the run's data sets as they are on disk now (status, why)."""
+        rows = view.run_rows(run)
         if not rows:
             return jsonify({"error": "no data sets of this run in the folders"}), 404
         return jsonify({"run": run, "info": view.rundocs([run]).get(run, {}), "datasets": rows,
@@ -409,7 +448,7 @@ def blueprint(profile, base: str = "") -> Blueprint:
             return jsonify({"error": f"run database: {str(e)[:200]}"}), 503
         if not d:
             return jsonify({"error": "not in the run database (private MC runs have no run document there)"}), 404
-        on_disk = {(r["dtype"], r["hash"]) for r in view.rows() if r["run"] == run}
+        on_disk = {(x.dtype, x.hash) for x in view.scan_run(run)}
         for e in d.get("data") or []:
             if isinstance(e, dict):
                 e["on_disk_here"] = (e.get("type"), e.get("lineage_hash")) in on_disk
