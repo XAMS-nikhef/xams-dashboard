@@ -39,6 +39,30 @@
         </div>
       </section>
 
+      {% if detector %}
+      <section class="panel">
+        <div class="panel-title">Detector <span class="muted small">slow control at the start and end of the run (sc_snapshot){% if detector.config %} · SC config {{ detector.config }}{% endif %}</span></div>
+        {% if detector.message %}<p class="muted small">{{ detector.message }}</p>{% endif %}
+        {% if detector.groups %}
+        <div class="grid">
+          {% for title, rows in detector.groups.items() %}
+          <div>
+            <div class="eyebrow-label">{{ title }}</div>
+            <table class="kv detector">
+              <tr><td></td><td class="muted num">start</td><td class="muted num">end</td><td></td></tr>
+              {% for label, a, b, unit, note in rows %}
+              <tr><td class="muted">{{ label }}</td><td class="mono num">{{ a }}</td><td class="mono num">{{ b }}</td>
+                  <td class="muted small">{{ unit }}{% if note %} <span class="small">· {{ note }}</span>{% endif %}</td></tr>
+              {% endfor %}
+            </table>
+          </div>
+          {% endfor %}
+        </div>
+        <p class="muted small">start {{ detector.times.start or '—' }} · end {{ detector.times.end or '—' }} (UTC) · fields: {{ detector.geometry }}</p>
+        {% endif %}
+      </section>
+      {% endif %}
+
       {% if ds %}{% for k in kinds %}{% for row in figure_rows[k] %}
       <section class="figrow">
         {% for name, title in row %}

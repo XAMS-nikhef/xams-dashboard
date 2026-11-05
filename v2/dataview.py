@@ -19,6 +19,7 @@ from pathlib import Path
 
 from flask import Blueprint, Response, abort, jsonify, render_template, request, send_file
 
+from backend.common import detector as DET
 from backend.common import folder as F
 from backend.common import runfigs as R
 from backend.common import stored
@@ -379,6 +380,17 @@ class DataView:
         tmp.replace(out)
         return out
 
+    def sc_snapshot(self, run: int) -> dict | None:
+        """The run document's sc_snapshot (slow control at start / end), read-only; None for MC runs or on error."""
+        if run >= MC_RUNS[0]:
+            return None
+        try:
+            import amstrax  # type: ignore
+            d = amstrax.get_run_collection(run).find_one({"number": run}, {"sc_snapshot": 1, "_id": 0}) or {}
+            return d.get("sc_snapshot") or {}
+        except Exception as e:                                   # noqa: BLE001
+            return {"error": str(e)[:200]}
+
     def run_page(self, run: int, ref_param: str = "") -> dict:
         """What the run page template needs."""
         rows = self.run_rows(run)
@@ -400,7 +412,9 @@ class DataView:
                 n = f"{n_rows:,} {'LED windows' if 'led' in kinds else 'events'}".replace(",", " ")
             except Exception:                                    # noqa: BLE001
                 n = ""
-        return {"kinds": kinds, "facts": facts, "ds": ds, "n_events": n, "ref_auto": auto[0] if auto else None,
+        sc = self.sc_snapshot(run)
+        det = None if sc is None else ({"message": "run database: " + sc["error"]} if "error" in sc else DET.panel(sc))
+        return {"detector": det, "kinds": kinds, "facts": facts, "ds": ds, "n_events": n, "ref_auto": auto[0] if auto else None,
                 "ref_choices": auto, "ref_param": ref_param,
                 "figure_rows": {k: [[(nm, next(t for x, t, _ in R.FIGURES[k] if x == nm)) for nm in row]
                                     for row in FIGURE_ROWS[k]] for k in kinds},
