@@ -220,6 +220,17 @@ class DataView:
             out.append({"provider": name, **dd, "labels": W.labels(dd)})
         return {"providers": out, "labels": sorted({lab for x in out for lab in x["labels"]})}
 
+    def read_only(self) -> dict:
+        """{location label: why read-only} for the page (only profiles with a location check)."""
+        if not self.p.location_check:
+            return {}
+        out = {}
+        for loc in self.p.locations:
+            why = self.p.location_check(loc.path)
+            if why:
+                out[loc.label] = why
+        return out
+
     def protected(self, d) -> str | None:
         """Why this data set can never be deleted by the data view (None: it can, under the profile's rules)."""
         if d.dtype in NEVER_TYPES:
@@ -294,6 +305,7 @@ class DataView:
         current = {(r["run"], r["dtype"]) for r in all_rows if r["status"] == "current"}
         keep = F.load_keep(self.p.state_dir)
         ok, refused = [], []
+        ro = {}                                                  # location index -> why read-only (checked now)
         for ds_id in dict.fromkeys(ids):
             try:
                 d = self.find(ds_id)
@@ -302,6 +314,11 @@ class DataView:
                 continue
             row = status.get(d.id) or {"status": self.lineage.status(d)["status"]}
             reason = self.protected(d)
+            if reason is None and self.p.location_check:
+                if d.loc not in ro:
+                    ro[d.loc] = self.p.location_check(self.location(d).path)
+                if ro[d.loc]:
+                    reason = "read-only here: " + ro[d.loc]
             raw = self.location(d).raw or d.dtype in RAW_TYPES
             if reason is None and d.id in keep:
                 reason = "marked keep"
@@ -389,6 +406,7 @@ def blueprint(profile, base: str = "") -> Blueprint:
                                              and not d["keep"]),
                         "datasets": slim})
         return {"runs": out, "totals": _totals(rows), "lineage": view.lineage.state, "scanning": not view._scan[0],
+                "read_only": view.read_only(),
                 "can_submit": bool(profile.submit),
                 "delete_statuses": sorted(profile.delete_statuses) if profile.delete_statuses else None}
 

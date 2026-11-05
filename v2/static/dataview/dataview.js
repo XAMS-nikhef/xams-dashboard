@@ -268,6 +268,9 @@ async function loadRuns() {
     for (const [id, k] of [["srFilter", "science_run"], ["classFilter", "run_class"], ["sourceFilter", "source"]])
       fillFilter(id, new Set(RUNS.map((r) => (r.info || {})[k])));
     renderTotals(j.totals, j.lineage);
+    const ro = Object.entries(j.read_only || {});              // folders this page may only show (not yours / central)
+    if (ro.length) $("totals").insertAdjacentHTML("beforeend", ro.map(([k, v]) =>
+      `<span class="t chip st-unknown" title="${esc(v)}">read-only: ${esc(k)}</span>`).join(""));
     if (j.scanning) { $("lineageState").textContent = "Scanning the folders (the first time takes a few minutes)…"; if (!pollTimer) pollTimer = setInterval(loadRuns, 10000); }
     renderRuns();
     const sel = RUNS.find((r) => r.run === selectedRun);
