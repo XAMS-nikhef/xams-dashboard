@@ -133,6 +133,8 @@ def test_token_required(client):
     assert client.get("/api/runs").status_code == 200                       # cookie from now on
     r = client.get("/?token=secret-token")
     assert r.status_code == 302 and r.headers["Location"].endswith("/")      # token out of the address
+    r = client.get("/run/7592?token=secret-token&ref=none")                  # any page, other arguments kept
+    assert r.status_code == 302 and r.headers["Location"].endswith("/run/7592?ref=none")
 
 
 def test_token_not_in_request_log(client):              # client: the app module with test settings
