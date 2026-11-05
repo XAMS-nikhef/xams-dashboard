@@ -572,11 +572,12 @@ def blueprint(profile, base: str = "") -> Blueprint:
     @bp.get("/api/runs")
     def runs():
         """?kind=data (runs below 900000) or mc (simulated runs 900000-999999); totals for that kind. The list holds
-        ~10k data sets: the serialized answer is reused while the rows are unchanged and sent gzipped. Job states are
-        not in it (they change every JOBS_TTL s): /api/jobs."""
+        ~10k data sets: the serialized answer is reused while the rows are unchanged and sent gzipped, at most
+        RUNDOC_TTL s (the run information in it, e.g. the source, comes from the run database and can be edited).
+        Job states are not in it (they change every JOBS_TTL s): /api/jobs."""
         kind = request.args.get("kind")
         rows = view.rows(kind)
-        key = (id(rows), bool(view._scan[0]), view.lineage.state.get("running"))
+        key = (id(rows), bool(view._scan[0]), view.lineage.state.get("running"), int(time.time() // RUNDOC_TTL))
         hit = view._runs_json.get(kind)
         if not (hit and hit[0] == key):
             body = json.dumps(_runs_payload(kind), default=_json_default, separators=(",", ":")).encode()
