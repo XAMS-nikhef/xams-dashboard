@@ -199,3 +199,21 @@ def test_find_without_scan(view):
     view.datasets_raw = lambda: (_ for _ in ()).throw(AssertionError("find must not scan"))
     d = view.find("1:007720-raw_records-rawrawrawr")
     assert d.run == 7720 and d.loc == 1 and d.n_files == 1
+
+
+def test_runs_answer_follows_run_database(view, monkeypatch):
+    """An edit in the run database (here the source) reaches /api/runs within RUNDOC_TTL, without a folder change."""
+    from v2 import dataview as DV
+    c = _client(view)
+    now = [1_000_000.0]
+    monkeypatch.setattr(DV.time, "time", lambda: now[0])
+    src = ["cs137"]
+    c.dv.rundocs = lambda runs: {r: {"source": src[0]} for r in runs}
+
+    def sources():
+        return {r["info"].get("source") for r in c.get("/api/runs").get_json()["runs"]}
+    assert sources() == {"cs137"}
+    src[0] = "na22"
+    assert sources() == {"cs137"}                                 # cached answer: still the old run information
+    now[0] += DV.RUNDOC_TTL
+    assert sources() == {"na22"}                                  # after RUNDOC_TTL: the edit is there
