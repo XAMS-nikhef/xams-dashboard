@@ -50,39 +50,46 @@ def _fields(snap):
 
 
 def panel(sc: dict | None) -> dict:
-    """What the template shows: rows [(label, start, end, unit, note)] per group; times; a message if there is no
-    snapshot."""
+    """What the run page shows (user, 2026-11-05): the conditions at the start of the run only, as one row of tiles
+    (fields, electrode voltages, pressure) plus the other start values in a table. The end snapshot is used only when
+    there is no start snapshot (and then said so)."""
     sc = sc or {}
-    start, end = sc.get("start"), sc.get("end")
-    if not start and not end:
-        return {"message": "no slow-control snapshot in the run document (written since run 7579)"}
-    msg = []
-    for which, s in (("start", start), ("end", end)):
-        if s and "unavailable" in s:
-            msg.append(f"{which}: slow control unavailable ({s['unavailable']})")
-        elif not s:
-            msg.append(f"{which}: no snapshot")
-    groups = {"High voltage": [], "Fields (uniform estimate)": [], "Detector": []}
-    for key, label in ELECTRODES:
-        (v1, u, f1), (v2, _, f2) = _v(start, f"hv_{key}_vmon"), _v(end, f"hv_{key}_vmon")
-        (i1, iu, _), (i2, _, _) = _v(start, f"hv_{key}_imon"), _v(end, f"hv_{key}_imon")
-        if v1 is None and v2 is None:
-            continue
-        cur = f"{_fmt(i1, 3)} / {_fmt(i2, 3)} {iu}" if (i1 is not None or i2 is not None) else ""
-        groups["High voltage"].append((label, _fmt(v1), _fmt(v2), u or "V", " ".join(x for x in (cur, f1, f2) if x)))
-    f_s, f_e = _fields(start), _fields(end)
-    for k in dict.fromkeys(list(f_s) + list(f_e)):
-        a, b = f_s.get(k, (None, "")), f_e.get(k, (None, ""))
-        unit = a[1] or b[1]
-        n = 4 if unit == "V" else 3                      # volts to the volt, fields to three digits
-        groups["Fields (uniform estimate)"].append((k, _fmt(a[0], n), _fmt(b[0], n), unit, ""))
-    for key, label in OTHER:
-        (v1, u, f1), (v2, _, f2) = _v(start, key), _v(end, key)
-        if v1 is None and v2 is None:
-            continue
-        groups["Detector"].append((label, _fmt(v1), _fmt(v2), u, " ".join(x for x in (f1, f2) if x)))
-    times = {w: str((s or {}).get("time") or "")[:19] for w, s in (("start", start), ("end", end))}
-    return {"groups": {k: v for k, v in groups.items() if v}, "times": times, "config": (start or end or {}).get("sc_config"),
-            "message": "; ".join(msg),
+    snap, which = sc.get("start"), "start"
+    if not snap or "unavailable" in snap:
+        if sc.get("end") and "unavailable" not in sc["end"]:
+            snap, which = sc["end"], "end"
+    if not snap or "unavailable" in snap:
+        why = (snap or {}).get("unavailable")
+        return {"message": f"slow control unavailable at the start ({why})" if why else
+                "no slow-control snapshot in the run document (written since run 7579)"}
+    f = _fields(snap)
+    tiles = []
+    for label, (v, u), n in (("drift field", f.get("drift field", (None, "V/cm")), 3),
+                             ("extraction (liquid)", f.get("extraction field, liquid", (None, "kV/cm")), 3)):
+        tiles.append((label, _fmt(v, n), u))
+    for key, label in ELECTRODES[:3]:
+        v, u, _ = _v(snap, f"hv_{key}_vmon")
+        tiles.append((label, _fmt(v), u or "V"))
+    v, u, _ = _v(snap, "pmain")
+    tiles.append(("pressure", _fmt(v), u))
+    rows = []
+    for k in ("ΔV gate − cathode", "ΔV anode − gate", "extraction field, gas"):
+        if k in f:
+            rows.append((k, _fmt(f[k][0], 4 if f[k][1] == "V" else 3), f[k][1], ""))
+    for key, label in ELECTRODES[3:]:
+        v, u, q = _v(snap, f"hv_{key}_vmon")
+        i, iu, _ = _v(snap, f"hv_{key}_imon")
+        if v is not None:
+            rows.append((label, _fmt(v), u or "V", " ".join(x for x in (f"{_fmt(i, 3)} {iu}" if i is not None else "", q) if x)))
+    for key, label in ELECTRODES[:3]:
+        i, iu, q = _v(snap, f"hv_{key}_imon")
+        if i is not None:
+            rows.append((f"{label} current", _fmt(i, 3), iu, q))
+    for key, label in OTHER[1:]:
+        v, u, q = _v(snap, key)
+        if v is not None:
+            rows.append((label, _fmt(v), u, q))
+    return {"tiles": tiles, "rows": rows, "which": which, "time": str(snap.get("time") or "")[:19],
+            "config": snap.get("sc_config"), "message": "" if which == "start" else "no start snapshot: values at the end",
             "geometry": f"gate–cathode {GATE_CATHODE_CM * 10:g} mm, gate–anode {GATE_ANODE_CM * 10:g} mm, "
                         f"liquid {LEVEL_ABOVE_GATE_CM * 10:g} mm above the gate, ε(LXe)/ε(GXe) {EPS_RATIO}"}

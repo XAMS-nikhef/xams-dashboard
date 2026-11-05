@@ -15,12 +15,31 @@
         </div>
       </header>
 
+      {% if detector %}
+      {% if detector.tiles %}
+      <section class="stats" aria-label="Detector at the start of the run" title="slow control at the {{ detector.which }} of the run (sc_snapshot {{ detector.time }} UTC); fields: uniform estimates ({{ detector.geometry }})">
+        {% for label, value, unit in detector.tiles %}
+        <div class="stat"><span class="label">{{ label }}</span><span class="value">{{ value }}<span class="unit"> {{ unit }}</span></span></div>
+        {% endfor %}
+      </section>
+      {% endif %}
+      {% if detector.message %}<p class="muted small">Detector: {{ detector.message }}</p>{% endif %}
+      {% endif %}
+
       <section class="grid">
         <div class="panel">
           <div class="panel-title">Run</div>
           <table class="kv">
             {% for k, v in facts %}<tr><td class="muted">{{ k }}</td><td>{{ v }}</td></tr>{% endfor %}
           </table>
+          {% if detector and detector.rows %}
+          <details><summary class="muted small">all slow-control values at the {{ detector.which }} ({{ detector.time }} UTC{% if detector.config %}, SC config {{ detector.config }}{% endif %})</summary>
+            <table class="kv">
+              {% for label, value, unit, note in detector.rows %}<tr><td class="muted">{{ label }}</td><td class="mono">{{ value }} {{ unit }}{% if note %} <span class="muted small">· {{ note }}</span>{% endif %}</td></tr>{% endfor %}
+            </table>
+            <p class="muted small">fields: uniform estimates ({{ detector.geometry }})</p>
+          </details>
+          {% endif %}
         </div>
         <div class="panel">
           <div class="panel-title">Figures <span class="muted small">{{ n_events }}</span></div>
@@ -38,30 +57,6 @@
           {% if not ds %}<p class="muted">No {{ 'LED' if 'led' in kinds else 'event' }} data of this run in the folders: no figures.</p>{% endif %}
         </div>
       </section>
-
-      {% if detector %}
-      <section class="panel">
-        <div class="panel-title">Detector <span class="muted small">slow control at the start and end of the run (sc_snapshot){% if detector.config %} · SC config {{ detector.config }}{% endif %}</span></div>
-        {% if detector.message %}<p class="muted small">{{ detector.message }}</p>{% endif %}
-        {% if detector.groups %}
-        <div class="grid">
-          {% for title, rows in detector.groups.items() %}
-          <div>
-            <div class="eyebrow-label">{{ title }}</div>
-            <table class="kv detector">
-              <tr><td></td><td class="muted num">start</td><td class="muted num">end</td><td></td></tr>
-              {% for label, a, b, unit, note in rows %}
-              <tr><td class="muted">{{ label }}</td><td class="mono num">{{ a }}</td><td class="mono num">{{ b }}</td>
-                  <td class="muted small">{{ unit }}{% if note %} <span class="small">· {{ note }}</span>{% endif %}</td></tr>
-              {% endfor %}
-            </table>
-          </div>
-          {% endfor %}
-        </div>
-        <p class="muted small">start {{ detector.times.start or '—' }} · end {{ detector.times.end or '—' }} (UTC) · fields: {{ detector.geometry }}</p>
-        {% endif %}
-      </section>
-      {% endif %}
 
       {% if ds %}{% for k in kinds %}{% for row in figure_rows[k] %}
       <section class="figrow">
