@@ -13,14 +13,13 @@ TARGET_TYPES = (
     "raw_records_sipm",
     "peaks",
     "peak_basics",
-    "events",
+    # amstrax 3: the four linked tables on the event windows; event_info still listed: data of runs processed before
+    # amstrax 3 (and MC runs) stay visible in the availability, they are read, not made
     "event_info",
-    "event_basics",
-    "event_positions",
-    # event structure v2 (amstrax #367, optional types: registered with event_structure_v2=True)
-    "event_peaks",
+    "event_windows",
+    "events",
     "sites",
-    "events_v2",
+    "event_peaks",
     "peak_context",
     "records_led",
     "led_calibration",
@@ -191,7 +190,7 @@ def _version_key(v: str):
     return (1, int(m.group(1)), v) if m else (2, 0, v)
 
 
-def processing_up_to_date(run_id: int, data_entries: List[Dict[str, Any]], dtype: str = "event_info") -> Dict[str, Any]:
+def processing_up_to_date(run_id: int, data_entries: List[Dict[str, Any]], dtype: str = "events") -> Dict[str, Any]:
     """Is the newest-version product of a run what the installed amstrax would make now?
 
     status: "current"  - a stored entry of the newest corrections version has the current lineage

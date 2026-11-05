@@ -17,6 +17,7 @@ import time
 from datetime import datetime
 from pathlib import Path
 
+import numpy as np
 from flask import Blueprint, Response, abort, jsonify, render_template, request, send_file
 
 from backend.common import detector as DET
@@ -82,6 +83,7 @@ class DataView:
         self._scan_lock = threading.Lock()
         self._scanning = False
         self._jobs = (0.0, {})
+        self._event_table: dict = {}                # (id, mtime) -> is an amstrax 3 event table
         self._runs_json: dict = {}               # kind -> (key, json bytes, gzipped bytes) of /api/runs
         self._lineage_for = None                 # (list signature, lineage version) the lineage was last started for
         self._scan_sig = (None, 0)               # (scan time, content signature) of the last folder scan
@@ -303,20 +305,38 @@ class DataView:
         return out
 
     @staticmethod
-    def figure_dataset(rows: list, kinds: list):
-        """The data set the figures are made of: event_info (led_calibration for an LED run); a current one first,
-        else the newest."""
-        dtype = "led_calibration" if "led" in kinds else "event_info"
-        cand = [r for r in rows if r["dtype"] == dtype and not r["temp"]]
+    def _best(rows: list, dtype: str, ok=None):
+        cand = [r for r in rows if r["dtype"] == dtype and not r["temp"] and (ok is None or ok(r))]
         cand.sort(key=lambda r: (r["status"] == "current", r["mtime"]), reverse=True)
         return cand[0] if cand else None
+
+    def is_event_table(self, row) -> bool:
+        """An amstrax 3 event table (`events` with cs1), not the event windows that were called `events` before."""
+        key = (row["id"], row["mtime"])
+        hit = self._event_table.get(key)
+        if hit is None:
+            try:
+                d = F.DataSet(**{k: row[k] for k in ("name", "run", "dtype", "hash", "temp", "size", "n_files", "mtime", "loc")})
+                hit = "cs1" in stored.read(self.location(d).path, d.name, max_rows=1).dtype.names
+            except Exception:                                    # noqa: BLE001 (unreadable: not used for figures)
+                hit = False
+            self._event_table[key] = hit
+        return hit
+
+    def figure_dataset(self, rows: list, kinds: list):
+        """The data set the figures are made of: the amstrax 3 event table `events` (joined with sites and
+        event_peaks in _data), else `event_info` of runs processed before amstrax 3; led_calibration for an LED run.
+        A current one first, else the newest."""
+        if "led" in kinds:
+            return self._best(rows, "led_calibration")
+        return self._best(rows, "events", self.is_event_table) or self._best(rows, "event_info")
 
     def reference_choices(self, run: int, kinds: list, info: dict, n: int = 30) -> list:
         """Earlier runs of the same kind (and source) with that data in the folders, nearest first (from the run
         list, no disk access)."""
-        dtype = "led_calibration" if "led" in kinds else "event_info"
+        dtypes = ("led_calibration",) if "led" in kinds else ("events", "event_info")
         mc = run >= MC_RUNS[0]
-        runs = sorted({r["run"] for r in self.rows() if r["dtype"] == dtype and not r["temp"] and r["run"] < run
+        runs = sorted({r["run"] for r in self.rows() if r["dtype"] in dtypes and not r["temp"] and r["run"] < run
                        and (r["run"] >= MC_RUNS[0]) == mc}, reverse=True)[:400]
         if "led" in kinds or not runs:
             return runs[:n]
@@ -343,13 +363,30 @@ class DataView:
         with lock:
             hit = self._data_cache.get(key)
             if hit is None:
-                d = F.DataSet(**{k: row[k] for k in ("name", "run", "dtype", "hash", "temp", "size", "n_files", "mtime", "loc")})
-                fields = R.LED_FIELDS if "led" in kinds else R.EVENT_FIELDS
-                hit = stored.read(self.location(d).path, d.name, max_rows=FIG_MAX_ROWS, fields=fields)
+                hit = self._read_figure_data(row, kinds)
                 self._data_cache[key] = hit
                 while len(self._data_cache) > 4:
                     self._data_cache.pop(next(iter(self._data_cache)))
         return hit
+
+    def _read_figure_data(self, row, kinds):
+        def read(r, fields, max_rows=FIG_MAX_ROWS):
+            d = F.DataSet(**{k: r[k] for k in ("name", "run", "dtype", "hash", "temp", "size", "n_files", "mtime", "loc")})
+            return stored.read(self.location(d).path, d.name, max_rows=max_rows, fields=fields)
+        if "led" in kinds:
+            return read(row, R.LED_FIELDS)
+        if row["dtype"] == "event_info":                         # processed before amstrax 3
+            return read(row, R.EVENT_FIELDS)
+        ev = read(row, R.TABLE_FIELDS["events"])
+        rows = self.run_rows(row["run"])
+        parts = {}
+        for t in ("sites", "event_peaks"):
+            r = self._best(rows, t)
+            # the same events: all rows up to the last event number shown (sites / peaks are several per event)
+            parts[t] = read(r, R.TABLE_FIELDS[t], max_rows=50 * FIG_MAX_ROWS) if r else None
+        empty = {t: np.zeros(0, dtype=[(f, np.float64) for f in R.TABLE_FIELDS[t]]) for t in parts}
+        return R.from_tables(ev, parts["sites"] if parts["sites"] is not None else empty["sites"],
+                             parts["event_peaks"] if parts["event_peaks"] is not None else empty["event_peaks"])
 
     def run_figure(self, run: int, name: str, ref_param: str = "") -> Path:
         """PNG of one figure of the run page, made once per (data set, reference data set, figure version)."""

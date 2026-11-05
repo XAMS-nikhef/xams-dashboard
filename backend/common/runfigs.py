@@ -7,8 +7,10 @@ of selected events; colour maps without a reference. Shared light style (plotsty
     FIGURES[kind]                   [(name, title, function)] per run kind: "event" (every run), "source", "led"
     make(name, e, ref, info)        a matplotlib Figure (e, ref: numpy record arrays; ref may be None)
 
-Units of event_info: times and widths in ns, positions in mm (r is clipped at the TPC wall, 31 mm), areas in PE,
-energy in keV.
+Units: times and widths in ns, positions in mm (r is clipped at the TPC wall, 31 mm), areas in PE, energy in keV.
+
+Data (amstrax 3): the event table `events` joined with its main site (`sites`, rank 1) and the main S1 / S2 peaks
+(`event_peaks`) by from_tables(); runs processed before amstrax 3 have only `event_info` (read as it is).
 """
 from __future__ import annotations
 
@@ -18,6 +20,44 @@ from . import plotstyle
 
 C = plotstyle.C
 EVENT_FIELDS = ["time", "s1_area", "s2_area", "cs1", "cs2", "energy", "drift_time", "s2_range_50p_area", "s2_x", "s2_y"]
+# fields read from the amstrax 3 tables for from_tables()
+TABLE_FIELDS = {"events": ["time", "event_number", "cs1", "cs2", "energy"],
+                "sites": ["event_number", "peak_index", "rank", "drift_time", "x", "y"],
+                "event_peaks": ["event_number", "peak_index", "type", "dt_s1", "area", "range_50p_area"]}
+
+
+def from_tables(ev, sites, peaks) -> np.ndarray:
+    """One row per event with EVENT_FIELDS from the amstrax 3 tables: cs1, cs2 (sum over the sites), energy and time
+    from events; drift_time, x, y of the main site (sites rank 1); s1_area of the main S1 (event_peaks type 1,
+    dt_s1 = 0); s2_area, s2_range_50p_area of the main site's peak. NaN where an event has no main S1 / site."""
+    out = np.full(len(ev), np.nan, dtype=[(f, np.float64) for f in EVENT_FIELDS])
+    out["time"] = ev["time"]
+    for f in ("cs1", "cs2", "energy"):
+        out[f] = ev[f]
+    en = np.asarray(ev["event_number"])
+    order = np.argsort(en)
+
+    def put(keys, values, field):
+        i = np.searchsorted(en, keys, sorter=order)
+        i = np.clip(i, 0, max(len(en) - 1, 0))
+        hit = (len(en) > 0) & (en[order[i]] == keys) if len(en) else np.zeros(len(keys), bool)
+        out[field][order[i[hit]]] = values[hit]
+
+    if len(peaks):
+        s1 = peaks[(peaks["type"] == 1) & (peaks["dt_s1"] == 0)]
+        put(s1["event_number"], s1["area"], "s1_area")
+    if len(sites):
+        main = sites[sites["rank"] == 1]
+        put(main["event_number"], main["drift_time"], "drift_time")
+        put(main["event_number"], main["x"], "s2_x")
+        put(main["event_number"], main["y"], "s2_y")
+        if len(peaks):
+            pi = np.argsort(peaks["peak_index"])
+            j = np.clip(np.searchsorted(peaks["peak_index"], main["peak_index"], sorter=pi), 0, len(peaks) - 1)
+            ok = peaks["peak_index"][pi[j]] == main["peak_index"]
+            put(main["event_number"][ok], peaks["area"][pi[j[ok]]], "s2_area")
+            put(main["event_number"][ok], peaks["range_50p_area"][pi[j[ok]]], "s2_range_50p_area")
+    return out
 LED_FIELDS = ["channel", "area"]
 VERSION = 4                                          # part of the cached file names: raise it when a figure changes
 TPC_R_MM = 31.0                                      # field cage inner radius (xams2026 geometry); s2_x / s2_y are clipped there

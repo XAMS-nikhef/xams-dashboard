@@ -222,7 +222,7 @@ def v2_runs():
 @app.get('/api/runs/uptodate')
 @app.get('/api/v2/runs/uptodate')
 def v2_runs_uptodate():
-    """Up-to-date status of event_info for a list of runs (slow: builds lineages; called after the table)."""
+    """Up-to-date status of the event table (amstrax 3 `events`) for a list of runs (slow: builds lineages)."""
     ids = [int(x) for x in (request.args.get('run_ids') or '').split(',') if x.strip().isdigit()][:200]
     ids = [i for i in ids if not mongo.is_mc(i)]          # simulated runs: not judged here (yet)
     docs = mongo.runs.find({'number': {'$in': ids}}, {'number': 1, 'data.type': 1, 'data.corrections_version': 1,
@@ -464,7 +464,7 @@ def v2_submit():
     ))
 
 
-DEFAULT_TARGETS = ['peak_basics', 'event_basics', 'event_positions', 'event_info']
+DEFAULT_TARGETS = ['peak_basics', 'events', 'sites', 'event_peaks', 'peak_context']   # amstrax 3
 
 
 def submit_runs(run_ids, requested_targets, corrections_version=None, amstrax_ref=None, resource_profile='8gb',
