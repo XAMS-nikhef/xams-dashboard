@@ -118,3 +118,5 @@ dialog::backdrop{background:rgba(18,20,26,.35);backdrop-filter:blur(2px)}
   border-left:4px solid var(--accent)}
 .toast.ok{border-left-color:var(--ok)}.toast.warn{border-left-color:var(--warn)}.toast.bad{border-left-color:var(--bad)}
 #dsTable td:nth-child(n+5){white-space:nowrap}
+.kv.detector td{padding:5px 6px}
+.kv.detector td:first-child{width:auto}
