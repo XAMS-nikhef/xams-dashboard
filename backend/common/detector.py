@@ -93,3 +93,26 @@ def panel(sc: dict | None) -> dict:
             "config": snap.get("sc_config"), "message": "" if which == "start" else "no start snapshot: values at the end",
             "geometry": f"gate–cathode {GATE_CATHODE_CM * 10:g} mm, gate–anode {GATE_ANODE_CM * 10:g} mm, "
                         f"liquid {LEVEL_ABOVE_GATE_CM * 10:g} mm above the gate, ε(LXe)/ε(GXe) {EPS_RATIO}"}
+
+
+def groups(sc: dict | None) -> dict:
+    """The start conditions grouped as on the Simulations run page: {"state": {...}, "voltages [V]": {...}} with the
+    unit in the key; {} when there is no usable snapshot (panel()["message"] says why)."""
+    p = panel(sc)
+    if not p.get("tiles"):
+        return {}
+    snap = (sc or {}).get(p["which"]) or {}
+    f = _fields(snap)
+    val = lambda k: _v(snap, k)[0]                                  # noqa: E731
+    state = {"liquid level above gate [mm]": LEVEL_ABOVE_GATE_CM * 10, "pressure [bar]": val("pmain"),
+             "drift field [V/cm]": f.get("drift field", (None,))[0],
+             "extraction field, liquid [kV/cm]": f.get("extraction field, liquid", (None,))[0],
+             "extraction field, gas [kV/cm]": f.get("extraction field, gas", (None,))[0],
+             "ΔV gate − cathode [V]": f.get("ΔV gate − cathode", (None,))[0],
+             "ΔV anode − gate [V]": f.get("ΔV anode − gate", (None,))[0],
+             "TT401 [°C]": val("tt401"), "TT402 [°C]": val("tt402"), "flow FM101 [g/min]": val("fm101")}
+    volts = {short: val(f"hv_{key}_vmon") for key, short in (("ts", "TS"), ("anode", "A"), ("gate", "G"), ("cathode", "C"),
+                                                              ("bs", "BS"), ("pmt_top", "PMT top"), ("pmt_bot", "PMT bottom"),
+                                                              ("sipm_eq", "SiPM equalizer"))}
+    fmt = lambda d: {k: _fmt(v, 3 if "field" in k else 4) for k, v in d.items() if v is not None}   # noqa: E731
+    return {"state": fmt(state), "voltages [V]": fmt(volts)}

@@ -25,3 +25,12 @@ def test_end_when_no_start_and_missing():
     assert dict((k, v) for k, v, _ in p["tiles"])["extraction (liquid)"] == "4.22"     # 5 kV at 4 + 4 mm
     assert "no slow-control snapshot" in D.panel({})["message"]
     assert "unavailable at the start (ssh timeout)" in D.panel({"start": {"unavailable": "ssh timeout"}})["message"]
+
+
+def test_groups_like_simulations():
+    g = D.groups({"start": _snap(-1546.2, -1046.0, 2501.0)})
+    assert list(g) == ["state", "voltages [V]"]
+    assert g["voltages [V]"] == {"A": "2501", "G": "-1046", "C": "-1546"}
+    assert g["state"]["drift field [V/cm]"] == "96.6" and g["state"]["pressure [bar]"] == "1.85"
+    assert g["state"]["liquid level above gate [mm]"] == "4"
+    assert D.groups({}) == {}

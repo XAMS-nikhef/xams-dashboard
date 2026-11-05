@@ -414,7 +414,8 @@ class DataView:
                 n = ""
         sc = self.sc_snapshot(run)
         det = None if sc is None else ({"message": "run database: " + sc["error"]} if "error" in sc else DET.panel(sc))
-        return {"detector": det, "kinds": kinds, "facts": facts, "ds": ds, "n_events": n, "ref_auto": auto[0] if auto else None,
+        det_groups = DET.groups(sc) if sc and "error" not in sc else {}
+        return {"detector": det, "detector_groups": det_groups, "kinds": kinds, "facts": facts, "ds": ds, "n_events": n, "ref_auto": auto[0] if auto else None,
                 "ref_choices": auto, "ref_param": ref_param,
                 "figure_rows": {k: [[(nm, next(t for x, t, _ in R.FIGURES[k] if x == nm)) for nm in row]
                                     for row in FIGURE_ROWS[k]] for k in kinds},
