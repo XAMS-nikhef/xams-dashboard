@@ -22,17 +22,17 @@
             {% for k, v in facts %}<tr><td class="muted">{{ k }}</td><td>{{ v }}</td></tr>{% endfor %}
           </table>
         </div>
-        {% if detector %}
+        {% for group, items in detector_groups.items() %}
         <div class="panel">
-          <div class="panel-title">Detector <span class="muted small">at the {{ detector.which or 'start' }} of the run</span></div>
-          {% if detector.message %}<p class="muted small">{{ detector.message }}</p>{% endif %}
-          {% if detector.tiles %}
+          <div class="panel-title">{{ group }} <span class="muted small">start of the run (sc_snapshot)</span></div>
           <table class="kv">
-            {% for label, value, unit in detector.tiles %}<tr><td class="muted">{{ label }}</td><td class="mono">{{ value }} {{ unit }}</td></tr>{% endfor %}
-            {% for label, value, unit, note in detector.rows %}<tr><td class="muted">{{ label }}</td><td class="mono">{{ value }} {{ unit }}{% if note %} <span class="muted small">· {{ note }}</span>{% endif %}</td></tr>{% endfor %}
+            {% for k, v in items.items() %}<tr><td class="muted">{{ k }}</td><td class="mono">{{ v }}</td></tr>{% endfor %}
           </table>
-          <p class="muted small">sc_snapshot {{ detector.time }} UTC · fields: uniform estimates ({{ detector.geometry }})</p>
-          {% endif %}
+        </div>
+        {% endfor %}
+        {% if detector and detector.message %}
+        <div class="panel"><div class="panel-title">state</div><p class="muted small">{{ detector.message }}</p></div>
+        {% endif %}
         </div>
         {% endif %}
         <div class="panel">
