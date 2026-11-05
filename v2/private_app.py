@@ -10,6 +10,7 @@ from __future__ import annotations
 import hmac
 import logging
 import re
+from urllib.parse import urlencode
 
 from flask import Flask, abort, make_response, redirect, request
 
@@ -71,8 +72,9 @@ def _set_cookie(resp):
 @app.before_request
 def _drop_token_from_url():
     """A page opened with ?token=: the cookie is set, then the same page without the token in its address."""
-    if request.method == "GET" and request.path == "/" and request.args.get("token"):
-        return redirect("/", code=302)
+    if request.method == "GET" and request.args.get("token") and not request.path.startswith("/api/"):
+        args = {k: v for k, v in request.args.items() if k != "token"}
+        return redirect(request.path + ("?" + urlencode(args) if args else ""), code=302)
 
 
 if __name__ == "__main__":

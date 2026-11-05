@@ -3,6 +3,7 @@ const $ = (id) => document.getElementById(id);
 const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({"&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;"}[c]));
 const STATUS_ORDER = ["current", "outdated", "incomplete", "unknown", "pending"];
 let RUNS = [], selectedRun = null, pollTimer = null, DELETABLE = null;
+const RUN_PAGE = window.RUN ?? null;                       // the run page (/run/<number>) or the run list
 const PAGE = 200;                                          // runs drawn at a time; "show more" adds the next page
 let shown = PAGE;   // DELETABLE: statuses the profile may delete (null: any)
 let KIND = location.hash === "#mc" ? "mc" : "data";      // the tab: data runs or simulated runs (900000-999999)
@@ -165,6 +166,7 @@ function renderRuns() {
 }
 
 function updateRunSel() {
+  if (!$("processBtn")) return;
   const n = document.querySelectorAll(".runSel:checked").length;
   $("processBtn").disabled = !CAN_SUBMIT || !n;
   $("processBtn").textContent = CAN_SUBMIT ? (n ? `Process ${n} run${n > 1 ? "s" : ""}…` : "Process selected runs…") : "Process (later)";
@@ -273,9 +275,6 @@ async function loadRuns() {
       `<span class="t chip st-unknown" title="${esc(v)}">read-only: ${esc(k)}</span>`).join(""));
     if (j.scanning) { $("lineageState").textContent = "Scanning the folders (the first time takes a few minutes)…"; if (!pollTimer) pollTimer = setInterval(loadRuns, 10000); }
     renderRuns();
-    const sel = RUNS.find((r) => r.run === selectedRun);
-    if (!sel) { selectedRun = null; $("dsTable").querySelector("tbody").innerHTML = ""; $("runInfo").textContent = ""; $("plots").innerHTML = ""; }
-    else loadDetail(selectedRun);
   } catch (e) { $("totals").textContent = "Error: " + e.message; }
 }
 
@@ -321,26 +320,20 @@ async function loadDetail(run) {
     const d = await api(`/api/run/${run}`);
     if (selectedRun !== run) return;
     DETAIL = d;
+    if (d.delete_statuses !== undefined) DELETABLE = d.delete_statuses;
+    if (d.can_submit !== undefined) CAN_SUBMIT = !!d.can_submit;
     renderDetail(d);
   } catch (e) { $("runInfo").textContent = "Could not load the run: " + e.message; }
 }
 
-function selectRun(run) {
-  selectedRun = run;
-  renderRuns();
-  const r = RUNS.find((x) => x.run === run);
-  $("detailTitle").textContent = `Run ${String(run).padStart(6, "0")} — loading…`;
-  $("dsTable").querySelector("tbody").innerHTML = "";
-  loadDetail(run);
-  $("plots").innerHTML = ""; $("plotInfo").textContent = "";
-  $("runDoc").innerHTML = "";
-  loadRunDoc(run);
+function selectRun(run) {                                   // the run list opens the run page
+  location.href = `${window.BASE || ""}/run/${run}`;
 }
 
 function renderDetail(r) {
   if (!r) { $("detailTitle").textContent = "Select a run"; return; }
   const i = r.info || {};
-  $("detailTitle").textContent = `Run ${String(r.run).padStart(6, "0")} — ${gb(r.size)}`;
+  $("detailTitle").textContent = `Data sets — ${gb(r.size)}`;
   $("reprocBtn").style.display = CAN_SUBMIT ? "" : "none";
   $("reprocBtn").onclick = () => openSubmit([r.run]);
   $("runInfo").innerHTML = [i.mode && `mode ${esc(i.mode)}`, i.source && `source ${esc(i.source)}`,
@@ -351,7 +344,7 @@ function renderDetail(r) {
   tb.innerHTML = "";
   for (const d of r.datasets) {
     const tr = document.createElement("tr");
-    const plottable = !d.temp && (d.dtype.startsWith("event") || d.dtype === "peak_basics");
+    const plottable = $("plots") && !d.temp && (d.dtype.startsWith("event") || d.dtype === "peak_basics");
     const noDel = d.keep ? "kept" : (d.dtype === "live" ? "live data are never deleted"
       : (DELETABLE && !DELETABLE.includes(d.status) ? `only ${DELETABLE.join(" / ")} data sets can be deleted here` : ""));
     tr.innerHTML = `<td><input type="checkbox" class="dsSel" value="${esc(d.id)}" ${checked.has(d.id) ? "checked" : ""} ${noDel ? `disabled title="${esc(noDel)}"` : ""}></td>`
@@ -373,6 +366,7 @@ function renderDetail(r) {
 }
 
 function updateSel() {
+  if (!$("delSelBtn")) return;
   const sel = [...document.querySelectorAll(".dsSel:checked")];
   $("delSelBtn").disabled = !sel.length;
   $("selInfo").textContent = sel.length ? `${sel.length} selected` : "";
@@ -388,7 +382,7 @@ async function toggleKeep(d) {
     await api("/api/keep", {name: d.id, keep: !d.keep, note});
     toast(d.keep ? `${esc(d.id)}: keep mark removed` : `${esc(d.id)}: marked keep`, "ok", 4000);
   } catch (e) { toast("Keep failed: " + esc(e.message), "bad"); }
-  loadRuns();
+  if (RUN_PAGE) loadDetail(RUN_PAGE); else loadRuns();
 }
 
 // ------------------------------------------------------------------ deletion: preview, confirm
@@ -430,7 +424,7 @@ async function runDelete(title, previewFn) {
       res.errors.length ? "warn" : "ok", res.errors.length ? 0 : 8000);
   } catch (e) { toast("Delete failed: " + esc(e.message), "bad", 0); }
   finally { done(); }
-  loadRuns(); loadDeletions();
+  if (RUN_PAGE) loadDetail(RUN_PAGE); else { loadRuns(); loadDeletions(); }
 }
 
 function deleteNames(names) {
@@ -517,23 +511,31 @@ function setKind(k) {
   document.querySelectorAll(".nav-link[data-kind]").forEach((a) => a.classList.toggle("active", a.dataset.kind === k));
   loadRuns();
 }
-document.querySelectorAll(".nav-link[data-kind]").forEach((a) => (a.onclick = (e) => { e.preventDefault(); history.replaceState(null, "", "#" + a.dataset.kind); setKind(a.dataset.kind); }));
-document.querySelectorAll(".nav-link[data-kind]").forEach((a) => a.classList.toggle("active", a.dataset.kind === KIND));
-const refilter = () => { shown = PAGE; renderRuns(); };   // a new filter starts again at the first page
-$("search").oninput = refilter;
-for (const id of ["srFilter", "classFilter", "sourceFilter"]) $(id).onchange = refilter;
-$("statusFilter").onchange = refilter;
-$("refreshBtn").onclick = async () => {
-  const done = busy("Starting the status computation…");
-  try { await api("/api/refresh", {}); toast("Status is being recomputed in the background (status 'pending' until done).", "info"); }
-  catch (e) { toast("Recompute failed: " + esc(e.message), "bad"); }
-  finally { done(); }
+if (RUN_PAGE) {
+  // the run page: the data-set table and its actions; the figures are images made by the server
+  selectedRun = RUN_PAGE;
+  loadDetail(RUN_PAGE);
+  $("delSelBtn").onclick = () => deleteNames([...document.querySelectorAll(".dsSel:checked")].map((c) => c.value));
+  $("runDocBox").ontoggle = () => loadRunDoc(selectedRun);
+  $("selAll").onchange = (e) => { document.querySelectorAll(".dsSel:not(:disabled)").forEach((c) => (c.checked = e.target.checked)); updateSel(); };
+  const refSel = $("refSel");
+  if (refSel) refSel.onchange = () => { location.search = refSel.value ? "?ref=" + refSel.value : ""; };
+} else {
+  document.querySelectorAll(".nav-link[data-kind]").forEach((a) => (a.onclick = (e) => { e.preventDefault(); history.replaceState(null, "", "#" + a.dataset.kind); setKind(a.dataset.kind); }));
+  document.querySelectorAll(".nav-link[data-kind]").forEach((a) => a.classList.toggle("active", a.dataset.kind === KIND));
+  const refilter = () => { shown = PAGE; renderRuns(); };   // a new filter starts again at the first page
+  $("search").oninput = refilter;
+  for (const id of ["srFilter", "classFilter", "sourceFilter"]) $(id).onchange = refilter;
+  $("statusFilter").onchange = refilter;
+  $("refreshBtn").onclick = async () => {
+    const done = busy("Starting the status computation…");
+    try { await api("/api/refresh", {}); toast("Status is being recomputed in the background (status 'pending' until done).", "info"); }
+    catch (e) { toast("Recompute failed: " + esc(e.message), "bad"); }
+    finally { done(); }
+    loadRuns();
+  };
+  $("delOutdatedBtn").onclick = () => deleteOutdated();
+  $("processBtn").onclick = () => openSubmit([...document.querySelectorAll(".runSel:checked")].map((c) => Number(c.value)));
   loadRuns();
-};
-$("delOutdatedBtn").onclick = () => deleteOutdated();
-$("delSelBtn").onclick = () => deleteNames([...document.querySelectorAll(".dsSel:checked")].map((c) => c.value));
-$("processBtn").onclick = () => openSubmit([...document.querySelectorAll(".runSel:checked")].map((c) => Number(c.value)));
-$("runDocBox").ontoggle = () => loadRunDoc(selectedRun);
-$("selAll").onchange = (e) => { document.querySelectorAll(".dsSel:not(:disabled)").forEach((c) => (c.checked = e.target.checked)); updateSel(); };
-loadRuns();
-loadDeletions();
+  loadDeletions();
+}

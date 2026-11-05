@@ -17,9 +17,10 @@ import time
 from datetime import datetime
 from pathlib import Path
 
-from flask import Blueprint, Response, jsonify, render_template, request
+from flask import Blueprint, Response, abort, jsonify, render_template, request, send_file
 
 from backend.common import folder as F
+from backend.common import runfigs as R
 from backend.common import stored
 from backend.common import whatchanged as W
 from backend.common.lineage import Lineage, provider_name
@@ -29,11 +30,16 @@ RUNDOC_TTL = 600
 JOBS_TTL = 20                     # seconds the condor / waiting-list state is reused
 SCAN_TTL = 60                     # seconds a folder scan is reused before a new one starts (in the background)
 RUNDOC_PROJ = {"number": 1, "mode": 1, "start": 1, "end": 1, "xams_bookkeeping": 1, "tags": 1, "comments": 1,
-               "processing_status": 1, "_id": 0}
+               "processing_status": 1, "xamssim.source": 1, "xamssim.state": 1, "_id": 0}
 
 # what the run list needs per data set (the run panel fetches the full rows with /api/run/<run>)
 LIST_FIELDS = ("id", "dtype", "hash", "status", "current_for", "keep", "size", "raw", "temp")
 LIST_SKIP_EMPTY = ("current_for", "keep", "raw", "temp")  # left out of the list when false / empty (most data sets)
+# the run page: figures in rows (runfigs.FIGURES), the data they are made of, how many rows are read at most
+FIGURE_ROWS = {"event": [["rate", "s2_width"], ["xy", "drift"], ["areas"]], "source": [["cs1_cs2", "spectrum"]],
+               "led": [["spe"]]}
+FIG_MAX_ROWS = 1_000_000
+NO_SOURCE = {"", "none", "no source", "-", "background"}
 PLOT_FIELDS = {
     "event": ["s1_area", "s2_area", "cs1", "cs2", "drift_time", "x", "y", "s1_area_fraction_top"],
     "peak": ["area", "area_fraction_top", "range_50p_area", "type"],
@@ -55,7 +61,8 @@ def _info(d) -> dict:
     last = com[-1].get("comment", "") if com and isinstance(com[-1], dict) else ""
     ps = d.get("processing_status")
     return {"mode": d.get("mode") or "", "start": _iso(d.get("start")), "end": _iso(d.get("end")),
-            "source": xb.get("source_type") or "", "run_class": xb.get("run_class") or "",
+            "source": xb.get("source_type") or (d.get("xamssim") or {}).get("source") or "",   # MC: the simulated source
+            "run_class": xb.get("run_class") or ("simulation" if d.get("xamssim") else ""),
             "science_run": xb.get("science_run_id") or "",
             "tags": [t.get("name") if isinstance(t, dict) else str(t) for t in d.get("tags") or []],
             "comment": str(last)[:200],
@@ -77,6 +84,9 @@ class DataView:
         self._runs_json: dict = {}               # kind -> (key, json bytes, gzipped bytes) of /api/runs
         self._lineage_for = None                 # (list signature, lineage version) the lineage was last started for
         self._scan_sig = (None, 0)               # (scan time, content signature) of the last folder scan
+        self._fig_lock = threading.Lock()
+        self._data_locks: dict = {}
+        self._data_cache: dict = {}              # (data set id, mtime) -> rows read for the run page figures
 
     def jobs(self) -> dict:
         """Job state per run (condor / waiting list) from the profile, cached JOBS_TTL seconds."""
@@ -281,6 +291,121 @@ class DataView:
         """The run panel: the run's data sets as they are on disk now (status, why), not from the last scan."""
         return self._rows_compute(self.scan_run(run), None)
 
+    # -------------------------------------------------------------------------------------------- run page
+    def run_kinds(self, run: int, rows: list, info: dict) -> list:
+        """What the run page shows: ["led"] for an LED run, else ["event"] (+ "source" for a source run)."""
+        if any(r["dtype"] == "led_calibration" for r in rows) or "led" in (info.get("mode") or "").lower():
+            return ["led"]
+        out = ["event"]
+        if (info.get("source") or "").strip().lower() not in NO_SOURCE:
+            out.append("source")
+        return out
+
+    @staticmethod
+    def figure_dataset(rows: list, kinds: list):
+        """The data set the figures are made of: event_info (led_calibration for an LED run); a current one first,
+        else the newest."""
+        dtype = "led_calibration" if "led" in kinds else "event_info"
+        cand = [r for r in rows if r["dtype"] == dtype and not r["temp"]]
+        cand.sort(key=lambda r: (r["status"] == "current", r["mtime"]), reverse=True)
+        return cand[0] if cand else None
+
+    def reference_choices(self, run: int, kinds: list, info: dict, n: int = 30) -> list:
+        """Earlier runs of the same kind (and source) with that data in the folders, nearest first (from the run
+        list, no disk access)."""
+        dtype = "led_calibration" if "led" in kinds else "event_info"
+        mc = run >= MC_RUNS[0]
+        runs = sorted({r["run"] for r in self.rows() if r["dtype"] == dtype and not r["temp"] and r["run"] < run
+                       and (r["run"] >= MC_RUNS[0]) == mc}, reverse=True)[:400]
+        if "led" in kinds or not runs:
+            return runs[:n]
+        src = (info.get("source") or "").strip().lower()
+        docs = self.rundocs(runs)
+        same = [r for r in runs if ((docs.get(r) or {}).get("source") or "").strip().lower() == src
+                and "led" not in ((docs.get(r) or {}).get("mode") or "").lower()]
+        return same[:n]
+
+    def _ref_run(self, run, kinds, info, ref_param: str):
+        if ref_param == "none":
+            return None
+        if ref_param.isdigit():
+            return int(ref_param)
+        choices = self.reference_choices(run, kinds, info, n=1)
+        return choices[0] if choices else None
+
+    def _data(self, row, kinds) -> "object":
+        """The rows of a data set for the figures, kept in memory for the few last data sets (a page asks for several
+        figures of the same data at once)."""
+        key = (row["id"], row["mtime"])
+        with self._fig_lock:
+            lock = self._data_locks.setdefault(key, threading.Lock())
+        with lock:
+            hit = self._data_cache.get(key)
+            if hit is None:
+                d = F.DataSet(**{k: row[k] for k in ("name", "run", "dtype", "hash", "temp", "size", "n_files", "mtime", "loc")})
+                fields = R.LED_FIELDS if "led" in kinds else R.EVENT_FIELDS
+                hit = stored.read(self.location(d).path, d.name, max_rows=FIG_MAX_ROWS, fields=fields)
+                self._data_cache[key] = hit
+                while len(self._data_cache) > 4:
+                    self._data_cache.pop(next(iter(self._data_cache)))
+        return hit
+
+    def run_figure(self, run: int, name: str, ref_param: str = "") -> Path:
+        """PNG of one figure of the run page, made once per (data set, reference data set, figure version)."""
+        rows = self.run_rows(run)
+        info = self.rundocs([run]).get(run, {})
+        kinds = self.run_kinds(run, rows, info)
+        if not any(name in row for k in kinds for row in FIGURE_ROWS[k]):
+            raise FileNotFoundError(name)
+        ds = self.figure_dataset(rows, kinds)
+        if ds is None:
+            raise FileNotFoundError("no data for figures")
+        ref_run = self._ref_run(run, kinds, info, ref_param)
+        rds = self.figure_dataset(self.run_rows(ref_run), kinds) if ref_run is not None else None
+        if rds is None:
+            ref_run = None
+        out = (self.p.state_dir / ".dashboard_figures" /
+               f"{name}_v{R.VERSION}_{ds['id'].replace(':', '_')}_{rds['id'].replace(':', '_') if rds else 'noref'}.png")
+        if out.exists():
+            return out
+        e = self._data(ds, kinds)
+        ref = self._data(rds, kinds) if rds else None
+        import matplotlib.pyplot as plt
+        fig = R.make(name, e, ref, {"run": run, "ref_run": ref_run})
+        out.parent.mkdir(parents=True, exist_ok=True)
+        tmp = out.with_suffix(f".{os.getpid()}.{threading.get_ident()}.tmp.png")
+        fig.savefig(tmp, dpi=110, bbox_inches="tight", pad_inches=0.12)
+        plt.close(fig)
+        tmp.replace(out)
+        return out
+
+    def run_page(self, run: int, ref_param: str = "") -> dict:
+        """What the run page template needs."""
+        rows = self.run_rows(run)
+        info = self.rundocs([run]).get(run, {})
+        kinds = self.run_kinds(run, rows, info)
+        ds = self.figure_dataset(rows, kinds)
+        auto = self.reference_choices(run, kinds, info)
+        facts = [(k, v) for k, v in (
+            ("mode", info.get("mode")), ("source", info.get("source")), ("class", info.get("run_class")),
+            ("science run", info.get("science_run")), ("start", (info.get("start") or "")[:19].replace("T", " ")),
+            ("end", (info.get("end") or "")[:19].replace("T", " ")), ("processing", info.get("processing")),
+            ("job", self.jobs().get(run, "")), ("tags", ", ".join(info.get("tags") or [])),
+            ("comment", info.get("comment")), ("run database", info.get("error"))) if v]
+        n = ""
+        if ds:
+            try:
+                n_rows = stored.metadata(self.location(F.DataSet(**{k: ds[k] for k in (
+                    "name", "run", "dtype", "hash", "temp", "size", "n_files", "mtime", "loc")})).path, ds["name"])["n_rows"]
+                n = f"{n_rows:,} {'LED windows' if 'led' in kinds else 'events'}".replace(",", " ")
+            except Exception:                                    # noqa: BLE001
+                n = ""
+        return {"kinds": kinds, "facts": facts, "ds": ds, "n_events": n, "ref_auto": auto[0] if auto else None,
+                "ref_choices": auto, "ref_param": ref_param,
+                "figure_rows": {k: [[(nm, next(t for x, t, _ in R.FIGURES[k] if x == nm)) for nm in row]
+                                    for row in FIGURE_ROWS[k]] for k in kinds},
+                "questions": R.QUESTIONS}
+
     # -------------------------------------------------------------------------------------------- deletion
     def _large(self, ok, rows) -> dict | None:
         """Whether a deletion touches more than bulk_limit of the data sets or bytes (raw records not counted)."""
@@ -385,11 +510,30 @@ def blueprint(profile, base: str = "") -> Blueprint:
                    static_url_path="/static/dataview")
     bp.view = view
 
+    def _page(template, **kw):
+        return render_template(template, base=base, profile=profile, user=os.getenv("USER", ""),
+                               locations=[str(x.path) for x in profile.locations],
+                               providers=[provider_name(p, i) for i, p in enumerate(profile.providers)], **kw)
+
     @bp.get("/")
     def index():
-        return render_template("dataview/index.html", base=base, profile=profile, user=os.getenv("USER", ""),
-                               locations=[str(x.path) for x in profile.locations],
-                               providers=[provider_name(p, i) for i, p in enumerate(profile.providers)])
+        return _page("dataview/index.html", page="runs")
+
+    @bp.get("/run/<int:run>")
+    def run_page(run: int):
+        """The run page: run information, figures (made on the server), data sets with their actions."""
+        ref = request.args.get("ref", "")
+        ref = ref if ref == "none" or ref.isdigit() else ""
+        return _page("dataview/run.html", page="run", run=run, **view.run_page(run, ref))
+
+    @bp.get("/run/<int:run>/fig/<name>.png")
+    def run_fig(run: int, name: str):
+        ref = request.args.get("ref", "")
+        ref = ref if ref == "none" or ref.isdigit() else ""
+        try:
+            return send_file(view.run_figure(run, name, ref), mimetype="image/png", max_age=300)
+        except FileNotFoundError:
+            abort(404)
 
     def _runs_payload(kind) -> dict:
         rows = view.rows(kind)
@@ -442,6 +586,8 @@ def blueprint(profile, base: str = "") -> Blueprint:
         if not rows:
             return jsonify({"error": "no data sets of this run in the folders"}), 404
         return jsonify({"run": run, "info": view.rundocs([run]).get(run, {}), "datasets": rows,
+                        "can_submit": bool(profile.submit),
+                        "delete_statuses": sorted(profile.delete_statuses) if profile.delete_statuses else None,
                         "size": sum(r["size"] for r in rows), "job": view.jobs().get(run, ""),
                         "provider_errors": {k: v.get(f"{run:06d}") for k, v in view.lineage.errors().items()
                                             if v.get(f"{run:06d}")}})

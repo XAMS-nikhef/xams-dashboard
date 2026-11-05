@@ -1,0 +1,72 @@
+{% extends "dataview/base.html" %}
+{% block title %}Run {{ "%06d"|format(run) }}{% endblock %}
+{% block js_vars %} window.RUN = {{ run|tojson }};{% endblock %}
+{% block content %}
+      <header class="page-head">
+        <div>
+          <p class="eyebrow"><a href="{{ base or '' }}/{% if run >= 900000 %}#mc{% endif %}">Processing / {{ 'central' if profile.name == 'production' else 'private' }} / runs</a></p>
+          <h1>Run {{ "%06d"|format(run) }}</h1>
+        </div>
+        <div class="aside">
+          <span id="busy" class="busy" hidden><span class="spin"></span><span id="busyText">working…</span></span>
+          {% for k in kinds %}<span class="tag">{{ {'event': 'events', 'source': 'source run', 'led': 'LED run'}[k] }}</span>{% endfor %}
+          {% if run >= 900000 %}<span class="tag">simulated</span>{% endif %}
+          <button id="reprocBtn" style="display:none" title="process this run again (targets and corrections version in the next step)">Reprocess…</button>
+        </div>
+      </header>
+
+      <section class="grid">
+        <div class="panel">
+          <div class="panel-title">Run</div>
+          <table class="kv">
+            {% for k, v in facts %}<tr><td class="muted">{{ k }}</td><td>{{ v }}</td></tr>{% endfor %}
+          </table>
+        </div>
+        <div class="panel">
+          <div class="panel-title">Figures <span class="muted small">{{ n_events }}</span></div>
+          <table class="kv">
+            <tr><td class="muted">data</td><td class="mono">{{ ds.name if ds else '—' }}</td></tr>
+            <tr><td class="muted">selection</td><td>events with an S1 and an S2 (no cuts yet; cut C later)</td></tr>
+            <tr><td class="muted">reference</td><td>
+              <select id="refSel" title="nearest earlier run of the same kind and source with data in the folders, or a run you choose">
+                <option value="">auto: {{ 'run %06d'|format(ref_auto) if ref_auto else 'none found' }}</option>
+                <option value="none"{% if ref_param == 'none' %} selected{% endif %}>none</option>
+                {% for r in ref_choices %}<option value="{{ r }}"{% if ref_param == r|string %} selected{% endif %}>run {{ "%06d"|format(r) }}</option>{% endfor %}
+              </select>
+            </td></tr>
+          </table>
+          {% if not ds %}<p class="muted">No {{ 'LED' if 'led' in kinds else 'event' }} data of this run in the folders: no figures.</p>{% endif %}
+        </div>
+      </section>
+
+      {% if ds %}{% for k in kinds %}{% for row in figure_rows[k] %}
+      <section class="figrow">
+        {% for name, title in row %}
+        <div class="panel">
+          <div class="panel-title">{{ title }} <span class="muted small">{{ questions[name] }}</span></div>
+          <img class="figure" loading="lazy" alt="{{ title }}"
+               src="{{ base or '' }}/run/{{ run }}/fig/{{ name }}.png{% if ref_param %}?ref={{ ref_param }}{% endif %}" />
+        </div>
+        {% endfor %}
+      </section>
+      {% endfor %}{% endfor %}{% endif %}
+
+      <section class="panel" id="detailPanel">
+        <div class="detail-head">
+          <div class="panel-title" id="detailTitle">Data sets</div>
+        </div>
+        <div id="runInfo" class="hint"></div>
+        <div class="table-wrap">
+          <table id="dsTable">
+            <thead><tr><th><input type="checkbox" id="selAll" /></th><th>data type</th><th>hash</th><th>status</th>
+              <th>size</th><th>files</th><th>made</th><th>where</th><th>keep</th><th></th></tr></thead>
+            <tbody></tbody>
+          </table>
+        </div>
+        <div class="controls">
+          <button id="delSelBtn" class="btn-danger" disabled>Delete selected…</button>
+          <span class="hint" id="selInfo"></span>
+        </div>
+        <details id="runDocBox"><summary>Run document</summary><div id="runDoc" class="run-doc"></div></details>
+      </section>
+{% endblock %}

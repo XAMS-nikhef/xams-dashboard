@@ -1,46 +1,5 @@
-<!doctype html>
-<html>
-<head>
-  <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>Processing ({{ profile.title }}) · XAMS</title>
-  <script>
-    // theme: the toggle's choice, else the system setting (same key as the Simulations app)
-    (function () {
-      var t = null;
-      try { t = localStorage.getItem("xamssim-theme"); } catch (e) {}
-      if (t !== "light" && t !== "dark") t = matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light";
-      document.documentElement.setAttribute("data-theme", t);
-    })();
-  </script>
-  <script src="https://cdn.plot.ly/plotly-2.35.2.min.js"></script>
-  <link rel="preconnect" href="https://fonts.googleapis.com" />
-  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;600&family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap" />
-  <link rel="stylesheet" href="{{ url_for('dataview.static', filename='xams.css') }}" />
-  <link rel="stylesheet" href="{{ url_for('dataview.static', filename='dataview.css') }}" />
-  <script>window.BASE = {{ base|tojson }}; window.PROFILE = {{ profile.name|tojson }};</script>
-</head>
-<body>
-  <div class="app">
-    <nav class="rail" aria-label="Main">
-      <a class="mark" href="{{ base or '' }}/" aria-label="Processing">XP</a>
-      <ul class="rail-nav">
-        <li><a class="rail-btn active" href="{{ base or '' }}/" data-tip="Runs" aria-label="Runs" aria-current="page">
-          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 6h16M4 12h16M4 18h16"/></svg></a></li>
-        {% for label, url in profile.links %}{% if label != 'Old dashboard' %}
-        <li><a class="rail-btn" href="{{ url }}" data-tip="{{ label }}" aria-label="{{ label }}">
-          {% if label == 'Corrections' %}<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 20V10M10 20V4M16 20v-7M22 20H2"/></svg>
-          {% else %}<svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="3"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3M5 5l2 2M17 17l2 2M5 19l2-2M17 7l2-2"/></svg>{% endif %}</a></li>
-        {% endif %}{% endfor %}
-      </ul>
-      <div class="rail-spacer"></div>
-      <button class="rail-btn solo" type="button" onclick="toggleTheme()" data-tip="Light / dark" aria-label="Switch between light and dark">
-        <svg class="theme-dark" viewBox="0 0 24 24" aria-hidden="true"><path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8Z"/></svg>
-        <svg class="theme-light" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="4.2"/><path d="M12 2.4v2.3M12 19.3v2.3M4.2 4.2l1.6 1.6M18.2 18.2l1.6 1.6M2.4 12h2.3M19.3 12h2.3M4.2 19.8l1.6-1.6M18.2 5.8l1.6-1.6"/></svg>
-      </button>
-    </nav>
-    <main>
+{% extends "dataview/base.html" %}
+{% block content %}
       <header class="page-head">
         <div>
           <p class="eyebrow">Processing / {{ 'central' if profile.name == 'production' else 'private' }} · <b>{{ user }}</b></p>
@@ -85,9 +44,8 @@
       <div class="hint" id="lineageState"></div>
     </section>
 
-    <div class="private-grid">
       <section class="panel">
-        <div class="panel-title">Runs</div>
+        <div class="panel-title">Runs <span class="muted small">click a run for its page</span></div>
         <div class="table-wrap runs-wrap">
           <table id="runsTable">
             <thead id="runsHead"></thead>
@@ -96,66 +54,8 @@
         </div>
       </section>
 
-      <section class="panel" id="detailPanel">
-        <div class="detail-head">
-          <div class="panel-title" id="detailTitle">Select a run</div>
-          <button id="reprocBtn" style="display:none" title="process this run again (targets and corrections version in the next step)">Reprocess…</button>
-        </div>
-        <div id="runInfo" class="hint"></div>
-        <details id="runDocBox"><summary>Run document</summary><div id="runDoc" class="run-doc"></div></details>
-        <div class="table-wrap">
-          <table id="dsTable">
-            <thead><tr><th><input type="checkbox" id="selAll" /></th><th>data type</th><th>hash</th><th>status</th>
-              <th>size</th><th>files</th><th>made</th><th>where</th><th>keep</th><th></th></tr></thead>
-            <tbody></tbody>
-          </table>
-        </div>
-        <div class="controls">
-          <button id="delSelBtn" class="btn-danger" disabled>Delete selected…</button>
-          <span class="hint" id="selInfo"></span>
-        </div>
-        <div class="plots-grid" id="plots"></div>
-        <div class="hint" id="plotInfo"></div>
-      </section>
-    </div>
-
     <section class="panel">
       <div class="panel-title">Deletions</div>
       <div class="table-wrap del-wrap"><table id="delTable"><thead><tr><th>time</th><th>user</th><th>data set</th><th>size</th></tr></thead><tbody></tbody></table></div>
     </section>
-    </main>
-  </div>
-
-  <dialog id="confirmDlg">
-    <h3 id="dlgTitle">Delete</h3>
-    <div id="dlgBody" class="dlg-body"></div>
-    <div class="controls">
-      <button id="dlgCancel">Cancel</button>
-      <button id="dlgOk" class="btn-danger">Delete</button>
-    </div>
-  </dialog>
-  <div id="toasts" class="toasts"></div>
-  <dialog id="submitDlg">
-    <h3>Process runs</h3>
-    <div class="dlg-body">
-      <p>Runs: <span id="subRuns"></span></p>
-      <p>Targets: <span id="subTargets"></span></p>
-      <p><span id="subVersionLabel">Corrections version</span>: <select id="subVersion"></select></p>
-      <p class="hint" id="subInfo"></p>
-      <div id="subResult"></div>
-    </div>
-    <div class="controls">
-      <button id="subCancel">Close</button>
-      <button id="subOk">Submit</button>
-    </div>
-  </dialog>
-  <script>
-    function toggleTheme() {
-      var t = document.documentElement.getAttribute("data-theme") === "dark" ? "light" : "dark";
-      document.documentElement.setAttribute("data-theme", t);
-      try { localStorage.setItem("xamssim-theme", t); } catch (e) {}
-    }
-  </script>
-  <script src="{{ url_for('dataview.static', filename='dataview.js') }}"></script>
-</body>
-</html>
+{% endblock %}
