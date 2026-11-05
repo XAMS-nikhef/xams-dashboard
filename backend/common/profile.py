@@ -10,6 +10,7 @@
 from __future__ import annotations
 
 import os
+import pwd
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Callable
@@ -18,6 +19,7 @@ RAW_TYPES = frozenset({"raw_records", "raw_records_ext", "raw_records_sipm"})
 NEVER_TYPES = frozenset({"live"})                    # never deleted by the data view, in any profile
 MC_RUNS = (900000, 999999)
 XAMS = Path("/data/xenon/xams_v2")
+LIVE_NAMES = frozenset({"live_data", "live_mc"})     # folders of live data (DAQ, simulated): never managed privately
 
 
 @dataclass
@@ -38,6 +40,8 @@ class Profile:
     token: str = ""
     raw_rule: Callable | None = None                  # (dataset) -> None if raw may go, else the reason it may not
     on_delete: Callable | None = None                 # (dataset, location) -> note, after a data set is deleted
+    # (location path) -> None if this server may delete there, else why not (read-only); checked at every deletion
+    location_check: Callable | None = None
     links: list = field(default_factory=list)         # [(label, url)] in the page header
     min_run: int = 0                                  # runs below it are not shown
     # deletion guards (production): an outdated data set (not raw) only when the same run has a current one of the
@@ -51,6 +55,34 @@ class Profile:
     jobs: Callable | None = None                      # () -> {run: job state} (condor / waiting list)
 
 
+def private_location_problem(path, xams: Path = XAMS, uid: int | None = None) -> str | None:
+    """Why a private dashboard may not delete in this folder (it is then shown read-only), or None.
+
+    Only the user's own folders: not live data (live_data, live_mc, anywhere), not the central folders of xams_v2 (all
+    but users/), not a folder owned by someone else (e.g. another user's area). The path is resolved first, so a
+    symlink into a central folder counts as that folder."""
+    try:
+        rp = Path(path).resolve()
+        st = rp.stat()
+    except OSError:
+        return None                                  # not there (yet): nothing to delete
+    if LIVE_NAMES & set(rp.parts):
+        return "live data are never deleted here"
+    try:
+        rel = rp.relative_to(Path(xams).resolve())
+        if not rel.parts or rel.parts[0] != "users":
+            return "a central XAMS folder (only the central dashboard manages it)"
+    except ValueError:
+        pass                                         # outside xams_v2: only the owner rule below
+    if st.st_uid != (os.getuid() if uid is None else uid):
+        try:
+            owner = pwd.getpwuid(st.st_uid).pw_name
+        except KeyError:
+            owner = str(st.st_uid)
+        return f"not your folder (owner {owner})"
+    return None
+
+
 def private_profile(settings) -> Profile:
     """The user's strax folder and, if set, the folders of their private MC (xams-sim reconstruction and raw records)."""
     locs = [Location(Path(settings.strax_folder), "strax_data")]
@@ -59,7 +91,8 @@ def private_profile(settings) -> Profile:
     if getattr(settings, "mc_raw_folder", None):
         locs.append(Location(Path(settings.mc_raw_folder), "mc_raw_records", raw=True))
     return Profile(name="private", title="private", locations=locs,
-                   state_dir=Path(settings.strax_folder), providers=list(settings.contexts), token=settings.token)
+                   state_dir=Path(settings.strax_folder), providers=list(settings.contexts), token=settings.token,
+                   location_check=private_location_problem)
 
 
 # ------------------------------------------------------------------------------------------------ production

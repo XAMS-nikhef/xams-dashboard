@@ -28,6 +28,8 @@ view = _bp.view
 processing = PrivateProcessing(view, max_jobs=S.max_jobs, memory_mb=S.job_memory_mb)
 _profile.submit, _profile.submit_options, _profile.jobs = processing.submit, processing.options, processing.jobs
 app.register_blueprint(_bp)
+for _label, _why in view.read_only().items():                  # shown, never deleted (profile.private_location_problem)
+    logging.getLogger(__name__).warning("folder %s is read-only here: %s", _label, _why)
 
 
 # ------------------------------------------------------------------------------------------------ access
