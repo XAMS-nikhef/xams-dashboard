@@ -450,9 +450,11 @@ async function loadDeletions() {
 }
 
 // ------------------------------------------------------------------ plots of one data set (read from its folder)
-const LAYOUT = {paper_bgcolor: "#111b2e", plot_bgcolor: "#0f1729", font: {color: "#dce7ff", size: 11},
+// plots in the page's colours (light / dark from the shared tokens)
+const CSSV = (n) => getComputedStyle(document.documentElement).getPropertyValue(n).trim();
+const LAYOUT = {paper_bgcolor: "rgba(0,0,0,0)", plot_bgcolor: "rgba(0,0,0,0)", font: {color: CSSV("--ink-2") || "#4a5160", size: 11, family: "Plus Jakarta Sans, sans-serif"},
   margin: {l: 55, r: 15, t: 30, b: 45}, height: 300};
-const AX = (title, log) => ({title, type: log ? "log" : "linear", gridcolor: "#2a3a58", zerolinecolor: "#2a3a58"});
+const AX = (title, log) => ({title, type: log ? "log" : "linear", gridcolor: CSSV("--line") || "#e6e8ee", zerolinecolor: CSSV("--line") || "#e6e8ee"});
 
 function pairs(a, b, logA, logB) {
   const x = [], y = [];
@@ -495,11 +497,11 @@ async function plotDataset(d) {
     if (s1 && s2) {
       const [x, y] = pairs(s1, s2, true, true);
       addPlot("S2 vs S1", hist2d(x, y, true, true), AX("log10 S1 [PE]"), AX("log10 S2 [PE]"));
-      addPlot("S1 spectrum", [{type: "histogram", x: x.map(Math.log10), nbinsx: 120, marker: {color: "#4db6ff"}}], AX("log10 S1 [PE]"), AX("events"));
+      addPlot("S1 spectrum", [{type: "histogram", x: x.map(Math.log10), nbinsx: 120, marker: {color: CSSV("--accent") || "#4f46e5"}}], AX("log10 S1 [PE]"), AX("events"));
     }
     if (c.drift_time) {
       const dt = c.drift_time.filter((v) => v !== null && v > 0).map((v) => v / 1000);
-      addPlot("drift time", [{type: "histogram", x: dt, nbinsx: 120, marker: {color: "#f1c40f"}}], AX("drift time [µs]"), AX("events"));
+      addPlot("drift time", [{type: "histogram", x: dt, nbinsx: 120, marker: {color: "#ca8a04"}}], AX("drift time [µs]"), AX("events"));
     }
     if (c.x && c.y) {
       const [x, y] = pairs(c.x, c.y, false, false);
