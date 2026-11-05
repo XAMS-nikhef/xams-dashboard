@@ -13,7 +13,7 @@
   --warn:#c2410c; --warn-soft:#fff1e6; --warn-ink:#9a3412;
   --ok:#15803d; --ok-soft:#dcf5e6; --ok-ink:#14532d;
   --bad:#b91c1c; --bad-soft:#fde8e8; --bad-ink:#991b1b;
-  --plate:#111b2e;                                   /* the background of the figure PNGs */
+  --plate:#ffffff;                                   /* the background of the figure PNGs (light style, plotstyle.py) */
   --grad-brand:linear-gradient(135deg,#6366f1,#8b5cf6);
   --grad-running:linear-gradient(135deg,#4f46e5,#6d28d9);
   --font-sans:"Plus Jakarta Sans",system-ui,-apple-system,"Segoe UI",sans-serif;
@@ -179,7 +179,17 @@ p{margin:0}
 .status.running{background:var(--grad-running);color:#fff}
 p.status{height:auto;padding:8px 14px;white-space:normal}
 
-/* ---- figures: the PNGs carry a dark navy background, so they sit on a matching plate ---- */
+/* ---- chain / plugin boxes: one per step, the same in Processing (its run list) ---- */
+.steps{display:inline-flex;gap:3px;vertical-align:middle;margin-right:6px}
+.blk{display:inline-block;width:13px;height:13px;border-radius:4px;vertical-align:middle;background:var(--inset-2)}
+.blk.st-current{background:var(--ok)}
+.blk.st-outdated{background:var(--bad)}
+.blk.st-unknown,.blk.st-incomplete{background:#ca8a04}
+.blk.st-running{background:var(--accent)}
+.blk.st-missing{background:transparent;box-shadow:inset 0 0 0 1px var(--rail)}
+.nowrap{white-space:nowrap}
+
+/* ---- figures: the PNGs have a white ground (plotstyle.py), also in the dark theme ---- */
 .figure{display:block;max-width:100%;height:auto;margin:0 auto;border-radius:var(--r-inset);background:var(--plate)}
 .grid.figures .figure{max-height:520px}
 .figrow .figure{width:100%}
