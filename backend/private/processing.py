@@ -182,8 +182,8 @@ class PrivateProcessing:
 
     def options(self) -> dict:
         names = [provider_name(p, i) for i, p in enumerate(self.view.p.providers)]
-        return {"targets": [OUTDATED, "peak_basics", "peak_positions", "event_basics", "event_positions", "event_info",
-                            "corrected_areas", "peaks_sipm"],
+        return {"targets": [OUTDATED, "peak_basics", "peak_positions", "events", "sites", "event_peaks", "peak_context",
+                            "peak_basics_ext", "peak_basics_sipm"],
                 "default_targets": [OUTDATED],
                 "target_labels": {OUTDATED: "the run's outdated data types"},
                 "corrections_versions": ["auto"] + names, "default_version": "auto",
