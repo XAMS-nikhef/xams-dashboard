@@ -93,14 +93,18 @@ function runMatches(r) {
 }
 
 // The chain in its order: one column per data type in the run list (types not in it follow alphabetically).
+// amstrax 3 (2026-11-06): the event tables on event_windows, then event_cuts; the amstrax-2 types (read only) at the end.
 const CHAIN = ["raw_records", "raw_records_ext", "raw_records_sipm", "pulse_counts", "records_led", "led_calibration",
-  "peaks", "peaks_sipm", "peak_basics", "peak_positions", "events", "event_basics", "event_positions", "corrected_areas", "event_info",
-  "event_peaks", "sites", "events_v2", "peak_context"];
+  "peaks", "peaks_ext", "peaks_sipm", "records_sipm", "peak_basics", "peak_basics_ext", "peak_basics_sipm", "peak_positions",
+  "event_windows", "events", "sites", "event_peaks", "peak_context", "event_cuts",
+  "event_basics", "event_positions", "corrected_areas", "event_info", "events_v2"];
 const SHORT = {raw_records: "raw", raw_records_ext: "raw ext", raw_records_sipm: "raw sipm", pulse_counts: "pulses",
-  records_led: "led rec", led_calibration: "led cal", peaks: "peaks", peaks_sipm: "peaks sipm", peak_basics: "pk basics",
-  peak_positions: "pk pos", events: "events", event_basics: "ev basics", event_positions: "ev pos",
-  corrected_areas: "corr", event_info: "ev info", event_peaks: "ev peaks", sites: "sites", events_v2: "events v2",
-  peak_context: "pk context"};
+  records_led: "led rec", led_calibration: "led cal", peaks: "peaks", peaks_ext: "peaks ext", peaks_sipm: "peaks sipm",
+  records_sipm: "rec sipm", peak_basics: "pk basics", peak_basics_ext: "pk ext", peak_basics_sipm: "pk sipm",
+  peak_positions: "pk pos", event_windows: "ev windows", events: "events", sites: "sites", event_peaks: "ev peaks",
+  peak_context: "pk context", event_cuts: "cuts",
+  event_basics: "ev basics (old)", event_positions: "ev pos (old)", corrected_areas: "corr (old)", event_info: "ev info (old)",
+  events_v2: "events v2 (old)"};
 let CAN_SUBMIT = false, SUBMIT_OPTS = null;
 
 function bestOf(ds) {
