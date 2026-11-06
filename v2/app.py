@@ -480,7 +480,7 @@ def v2_submit():
     ))
 
 
-DEFAULT_TARGETS = ['peak_basics', 'events', 'sites', 'event_peaks', 'peak_context']   # amstrax 3
+DEFAULT_TARGETS = ['peak_basics', 'events', 'sites', 'event_peaks', 'peak_context', 'event_cuts']   # amstrax 3.1
 
 
 def submit_runs(run_ids, requested_targets, corrections_version=None, amstrax_ref=None, resource_profile='8gb',

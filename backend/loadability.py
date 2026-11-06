@@ -21,6 +21,7 @@ TARGET_TYPES = (
     "sites",
     "event_peaks",
     "peak_context",
+    "event_cuts",
     "records_led",
     "led_calibration",
 )
