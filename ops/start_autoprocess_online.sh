@@ -3,7 +3,7 @@ set -euo pipefail
 
 SCREEN_NAME=${XAMS_AUTOPROC_SCREEN_NAME:-xams_auto_processing_online}
 AMSTRAX_DIR=${XAMS_STBC_AMSTRAX_DIR:-/data/xenon/xams_v2/software/amstrax/amstrax/auto_processing_new}
-TARGET=${XAMS_AUTOPROC_TARGET:-"raw_records peak_basics events sites event_peaks peak_context"}   # amstrax 3; NaI / SiPM added per run
+TARGET=${XAMS_AUTOPROC_TARGET:-"raw_records peak_basics events sites event_peaks peak_context event_cuts"}   # amstrax 3.1; NaI / SiPM added per run
 MEM=${XAMS_AUTOPROC_MEM:-16000}
 MAX_JOBS=${XAMS_AUTOPROC_MAX_JOBS:-25}
 QUEUE=${XAMS_AUTOPROC_QUEUE:-short}
