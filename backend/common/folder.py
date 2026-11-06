@@ -75,6 +75,15 @@ def _size(path: Path) -> tuple[int, int, float]:
     return size, n, st.st_mtime
 
 
+def _size_or_none(path: Path):
+    """_size, or None when the folder went away during the scan (strax renames `<name>_temp` when a data set is
+    finished, and deletion moves folders to the trash): skip that one data set instead of the whole location."""
+    try:
+        return _size(path)
+    except OSError:
+        return None
+
+
 def scan(folder: Path, loc: int = 0, min_run: int = 0) -> list[DataSet]:
     """All data sets in the folder (other files and folders are ignored); runs below min_run are skipped before
     their size is read."""
@@ -88,9 +97,9 @@ def scan(folder: Path, loc: int = 0, min_run: int = 0) -> list[DataSet]:
     # the sizes need one directory listing per data set: on NFS that is latency-bound (10k raw_records sets: ~3 min
     # serially, 30-10-2026), so list them in parallel
     with ThreadPoolExecutor(max_workers=SCAN_THREADS) as ex:
-        sizes = list(ex.map(lambda ep: _size(Path(ep[0].path)), found))
-    out = [DataSet(name=e.name, run=int(p["run"]), dtype=p["dtype"], hash=p["hash"], temp=bool(p["temp"]), size=size,
-                   n_files=n, mtime=mtime, loc=loc) for (e, p), (size, n, mtime) in zip(found, sizes)]
+        sizes = list(ex.map(lambda ep: _size_or_none(Path(ep[0].path)), found))
+    out = [DataSet(name=e.name, run=int(p["run"]), dtype=p["dtype"], hash=p["hash"], temp=bool(p["temp"]), size=sz[0],
+                   n_files=sz[1], mtime=sz[2], loc=loc) for (e, p), sz in zip(found, sizes) if sz is not None]
     return sorted(out, key=lambda d: (d.run, d.dtype, -d.mtime))
 
 
