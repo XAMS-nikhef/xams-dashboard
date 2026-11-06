@@ -123,7 +123,8 @@ dialog::backdrop{background:rgba(18,20,26,.35);backdrop-filter:blur(2px)}
 
 /* view only (central page without a key of a user with central_actions): no action buttons, no selection boxes */
 html.view-only #refreshBtn, html.view-only #processBtn, html.view-only #delOutdatedBtn, html.view-only #delSelBtn,
-html.view-only #reprocBtn, html.view-only .runSel, html.view-only .dsSel, html.view-only #selAll{display:none !important}
+html.view-only #reprocBtn, html.view-only .runSel, html.view-only .dsSel, html.view-only #selAll,
+html.view-only .restoreBtn{display:none !important}
 
 /* setup page */
 .setup-row{display:grid;grid-template-columns:150px 1fr auto;gap:10px;align-items:center;padding:10px 0;

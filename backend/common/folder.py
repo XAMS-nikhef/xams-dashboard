@@ -4,6 +4,10 @@ their sizes, keep marks and deletion.
 Deletion is limited to data-set folders directly inside the strax folder (names checked against the strax pattern,
 resolved paths checked to lie in the folder), never a kept one, and every deletion is logged. Keep marks and the log
 are small files in the folder itself: .dashboard_keep.json, .dashboard_deletions.log.
+
+A deleted data set first goes to the trash: <folder>/.trash/<name>__<YYYYmmdd-HHMMSS> (a rename on the same file
+system, nothing copied). It can be restored from there; empty_trash() removes it for good after TRASH_DAYS (7) days.
+The disk space comes free only then.
 """
 from __future__ import annotations
 
@@ -20,6 +24,9 @@ from pathlib import Path
 NAME = re.compile(r"^(?P<run>\d{6})-(?P<dtype>[A-Za-z0-9_]+)-(?P<hash>[a-z0-9]{10})(?P<temp>_temp)?$")
 KEEP_FILE = ".dashboard_keep.json"
 LOG_FILE = ".dashboard_deletions.log"
+TRASH = ".trash"
+TRASH_DAYS = float(os.environ.get("XAMS_DASH_TRASH_DAYS", "7"))
+TRASHED = re.compile(r"^(?P<name>[^/]+?)__(?P<stamp>\d{8}-\d{6})(?:-\d+)?$")    # <name>__<when>[-n]
 
 _SIZES: dict = {}            # folder path -> (mtime, size, n_files)
 SCAN_THREADS = int(os.environ.get("XAMS_DASH_SCAN_THREADS", "16"))   # parallel directory listings in scan()
@@ -130,6 +137,91 @@ def _target(folder: Path, name: str) -> Path:
     return p
 
 
+# ------------------------------------------------------------------------------------------------ trash
+def to_trash(path: Path, now: float | None = None) -> Path:
+    """Move the data-set folder `path` into the trash of its folder (a rename: same file system, nothing copied)."""
+    path = Path(path)
+    trash = path.parent / TRASH
+    trash.mkdir(exist_ok=True)
+    if trash.is_symlink():
+        raise ValueError("the trash folder is a link")
+    stamp = time.strftime("%Y%m%d-%H%M%S", time.localtime(now))
+    dst, i = trash / f"{path.name}__{stamp}", 1
+    while dst.exists():
+        dst, i = trash / f"{path.name}__{stamp}-{i}", i + 1
+    os.rename(path, dst)
+    _SIZES.pop(str(path), None)
+    return dst
+
+
+def _trashed_at(name: str) -> float | None:
+    m = TRASHED.match(name)
+    if not m:
+        return None
+    try:
+        return time.mktime(time.strptime(m.group("stamp"), "%Y%m%d-%H%M%S"))
+    except ValueError:
+        return None
+
+
+def trash_list(folder: Path, days: float | None = None) -> list:
+    """What is in the trash of `folder`: [{entry, name, trashed, expires, size}], newest first."""
+    days = TRASH_DAYS if days is None else days
+    t = Path(folder) / TRASH
+    out = []
+    try:
+        entries = list(os.scandir(t))
+    except OSError:
+        return []
+    for e in entries:
+        at = _trashed_at(e.name)
+        if at is None or not e.is_dir(follow_symlinks=False):
+            continue
+        size, n, _ = _size(Path(e.path))
+        out.append({"entry": e.name, "name": TRASHED.match(e.name).group("name"), "folder": str(folder),
+                    "trashed": time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(at)),
+                    "expires": time.strftime("%Y-%m-%d %H:%M", time.localtime(at + days * 86400)),
+                    "size": size, "n_files": n})
+    return sorted(out, key=lambda x: x["trashed"], reverse=True)
+
+
+def empty_trash(folder: Path, days: float | None = None, now: float | None = None) -> list:
+    """Remove for good what has been in the trash of `folder` longer than `days`; returns the entries removed."""
+    days = TRASH_DAYS if days is None else days
+    now = time.time() if now is None else now
+    t = Path(folder) / TRASH
+    gone = []
+    try:
+        entries = list(os.scandir(t))
+    except OSError:
+        return []
+    for e in entries:
+        at = _trashed_at(e.name)
+        if at is None or e.is_symlink() or not e.is_dir(follow_symlinks=False) or now - at < days * 86400:
+            continue
+        try:
+            shutil.rmtree(e.path)
+            gone.append(e.name)
+        except OSError:
+            pass
+    return gone
+
+
+def restore(folder: Path, entry: str) -> str:
+    """Move a trash entry back to its data-set name in `folder`; ValueError if that is not possible."""
+    if "/" in entry or not TRASHED.match(entry) or parse(TRASHED.match(entry).group("name")) is None:
+        raise ValueError("not a trash entry")
+    src = Path(folder) / TRASH / entry
+    if src.is_symlink() or not src.is_dir():
+        raise ValueError("no such trash entry")
+    name = TRASHED.match(entry).group("name")
+    dst = Path(folder) / name
+    if dst.exists():
+        raise ValueError(f"{name} exists again in the folder (made anew): delete that one first")
+    os.rename(src, dst)
+    return name
+
+
 def delete(folder: Path, names: list, confirm: bool = False) -> dict:
     """Preview (confirm False) or delete data sets. Returns what is (or would be) deleted with sizes, and what is
     refused and why."""
@@ -153,8 +245,7 @@ def delete(folder: Path, names: list, confirm: bool = False) -> dict:
     log = Path(folder) / LOG_FILE
     for x in ok:
         try:
-            shutil.rmtree(_target(folder, x["name"]))
-            _SIZES.pop(str(Path(folder) / x["name"]), None)
+            to_trash(_target(folder, x["name"]))
             out["deleted"].append(x["name"])
             with open(log, "a") as f:
                 f.write(json.dumps({"time": time.strftime("%Y-%m-%d %H:%M:%S"), "user": getpass.getuser(),

@@ -1,9 +1,9 @@
 from __future__ import annotations
 
 import os
-import shutil
 from typing import Any
 
+from .common.folder import to_trash
 from .loadability import scan_disk_availability
 
 # Never deleted by "delete data": the raw data (rebuilding them needs the live data) and the live data themselves.
@@ -12,7 +12,8 @@ KEEP_TYPES = frozenset({"live", "raw_records", "raw_records_ext", "raw_records_s
 
 
 def delete_run_disk_data(run_id: int) -> dict[str, Any]:
-    """Delete the processed-data directories found for run_id; raw and live data are kept.
+    """Delete the processed-data directories found for run_id; raw and live data are kept. Deleted means moved to
+    the trash of their folder (.trash, emptied after 7 days by the data view at /v3).
 
     Uses the same scan as the loadability table, so it covers all storage locations; datasets whose type is in
     KEEP_TYPES are listed under "kept" and left alone.
@@ -34,7 +35,7 @@ def delete_run_disk_data(run_id: int) -> dict[str, Any]:
         if not os.path.isdir(dirpath):
             continue
         try:
-            shutil.rmtree(dirpath)
+            to_trash(dirpath)                   # restorable for TRASH_DAYS (backend/common/folder.py)
             deleted.append(dirpath)
         except Exception as exc:
             errors.append({"path": dirpath, "error": str(exc)})

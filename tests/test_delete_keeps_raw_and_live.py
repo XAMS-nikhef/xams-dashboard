@@ -19,7 +19,8 @@ def test_disk_delete_keeps_raw(tmp_path, monkeypatch):
     monkeypatch.setattr(ds, "scan_disk_availability", lambda run_id: rows)
     out = ds.delete_run_disk_data(7719)
     assert sorted(os.listdir(raw)) == ["007719-raw_records-aaa", "007719-raw_records_ext-aaa", "007719-raw_records_sipm-aaa"]
-    assert os.listdir(proc) == []
+    assert os.listdir(proc) == [".trash"]                       # moved to the trash, not removed at once
+    assert len(os.listdir(proc / ".trash")) == 2
     assert len(out["deleted"]) == 2 and len(out["kept"]) == 3 and not out["errors"]
 
 
