@@ -112,8 +112,13 @@ function bestOf(ds) {
     || [...ds].sort((a, b) => STATUS_ORDER.indexOf(a.status) - STATUS_ORDER.indexOf(b.status))[0];
 }
 
+// event types of amstrax 2 (read with the frozen PROD4 environment): hidden in the run list unless asked for
+const OLD_TYPES = ["event_basics", "event_positions", "corrected_areas", "event_info", "events_v2"];
+const showOld = () => { const c = $("showOld"); return !!(c && c.checked); };
+
 function typeColumns(runs) {
   const seen = new Set(runs.flatMap((r) => r.datasets.map((d) => d.dtype)));
+  if (!showOld()) OLD_TYPES.forEach((t) => seen.delete(t));
   return [...CHAIN.filter((t) => seen.has(t)), ...[...seen].filter((t) => !CHAIN.includes(t)).sort()];
 }
 
@@ -549,6 +554,14 @@ if (RUN_PAGE) {
   $("search").oninput = refilter;
   for (const id of ["srFilter", "classFilter", "sourceFilter"]) $(id).onchange = refilter;
   $("statusFilter").onchange = refilter;
+  const old = $("showOld");
+  if (old) {
+    try { old.checked = localStorage.getItem("dash.showOld") === "1"; } catch (e) { /* no storage: default off */ }
+    old.onchange = () => {
+      try { localStorage.setItem("dash.showOld", old.checked ? "1" : "0"); } catch (e) { /* not remembered */ }
+      renderRuns();
+    };
+  }
   $("refreshBtn").onclick = async () => {
     const done = busy("Starting the status computation…");
     try { await api("/api/refresh", {}); toast("Status is being recomputed in the background (status 'pending' until done).", "info"); }
