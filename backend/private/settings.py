@@ -31,7 +31,15 @@ def settings_path() -> Path:
 
 
 def default_port() -> int:
-    """A port per user, so that two users' private dashboards on one host do not collide."""
+    """The port of this user's private dashboard: dashboard_port in users.yaml, else one per user id, so that two
+    users' private dashboards on one host do not collide."""
+    try:
+        from backend.common import users
+        u = users.for_account()
+        if u and u.dashboard_port:
+            return u.dashboard_port
+    except Exception:                                                # noqa: BLE001
+        pass
     return 20000 + os.getuid() % 20000
 
 
@@ -61,3 +69,16 @@ class PrivateSettings:
                    mc_raw_folder=Path(d["mc_raw_folder"]) if d.get("mc_raw_folder") else None,
                    mc_processed_folder=Path(d["mc_processed_folder"]) if d.get("mc_processed_folder") else None,
                    job_memory_mb=int(d.get("job_memory_mb") or 8000), path=path)
+
+
+if __name__ == "__main__":
+    # python -m backend.private.settings port     the port the private dashboard listens on (ops/start_private.sh)
+    import sys
+    if sys.argv[1:] == ["port"]:
+        try:
+            print(json.loads(settings_path().read_text()).get("dashboard_port") or default_port())
+        except (OSError, ValueError):
+            print(default_port())
+    else:
+        print(__doc__)
+        sys.exit(1)

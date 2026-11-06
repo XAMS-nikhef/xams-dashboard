@@ -59,8 +59,21 @@ contexts, plots of any stored version, keep marks and deletion (preview, confirm
    providers (`contexts`: a function of your analysis code that returns the context of a run, e.g.
    `xams_sr.py:context_for_runs(["{run}"])`; optionally limited to a run range).
 3. `ops/start_private.sh` (start | stop | status | url). The first start adds a secret token to the settings; every
-   request needs it (`?token=` once, then a cookie). Port: `dashboard_port`, default 20000 + uid % 20000.
+   request needs it (`?token=` once, then a cookie). Port: `dashboard_port` of the settings, else your entry in
+   `users.yaml`, else 20000 + uid % 20000.
 4. From your machine: `ssh -N -L 18078:127.0.0.1:<port> stbc-i1`, then `http://127.0.0.1:18078/?token=<token>`.
+
+Setup (gear icon, `/setup`): your folders for data and MC, each with a **Check** (exists, readable, writable,
+how many runs); **Save and restart** writes them into `~/.xams/private.json` (other keys kept) and the app
+restarts with them. The central page shows its folders there, not changeable.
+
+## Users (`users.yaml`)
+
+Names, STBC accounts, the ports of each user's private servers and `central_actions` (may submit / delete on the
+central dashboard; default view only). No secrets: keys stay in the accounts' homes. Central actions need both a
+key in xamsdata's `~/.xams_dashboard_keys.json` (`python -m backend.common.keys add <name>`) and
+`central_actions: true`; without them the central pages are view only (no action buttons; the server refuses
+the actions too). A new user: a block with the next free ports, PR, deploy.
 
 Files it keeps in the strax folder: `.dashboard_lineage.json` (hash cache), `.dashboard_keep.json` (keep marks),
 `.dashboard_deletions.log`, `.dashboard_private.log` (app log, only readable by you). Deletion is limited to data-set

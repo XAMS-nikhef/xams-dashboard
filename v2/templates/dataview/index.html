@@ -6,6 +6,7 @@
           <h1>Runs</h1>
         </div>
         <div class="aside">
+          {% if not can_act %}<span class="tag" title="you can look, not act: central actions need a key of a user with central_actions (users.yaml)">view only</span>{% endif %}
           <span id="busy" class="busy" hidden><span class="spin"></span><span id="busyText">working…</span></span>
           <span class="segmented">
             <a class="nav-link active" href="#data" data-kind="data">Data</a>

@@ -19,7 +19,8 @@
   <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;600&family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap" />
   <link rel="stylesheet" href="{{ url_for('dataview.static', filename='xams.css') }}" />
   <link rel="stylesheet" href="{{ url_for('dataview.static', filename='dataview.css') }}" />
-  <script>window.BASE = {{ base|tojson }}; window.PROFILE = {{ profile.name|tojson }};{% block js_vars %}{% endblock %}</script>
+  <script>window.BASE = {{ base|tojson }}; window.PROFILE = {{ profile.name|tojson }}; window.CAN_ACT = {{ (can_act if can_act is defined else true)|tojson }};
+    if (!window.CAN_ACT) document.documentElement.classList.add("view-only");{% block js_vars %}{% endblock %}</script>
 </head>
 <body>
   <div class="app">
@@ -35,6 +36,8 @@
         {% endif %}{% endfor %}
       </ul>
       <div class="rail-spacer"></div>
+      <a class="rail-btn solo{% if page == 'setup' %} active{% endif %}" href="{{ base or '' }}/setup" data-tip="Setup: folders" aria-label="Setup">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1Z"/></svg></a>
       <button class="rail-btn solo" type="button" onclick="toggleTheme()" data-tip="Light / dark" aria-label="Switch between light and dark">
         <svg class="theme-dark" viewBox="0 0 24 24" aria-hidden="true"><path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8Z"/></svg>
         <svg class="theme-light" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="4.2"/><path d="M12 2.4v2.3M12 19.3v2.3M4.2 4.2l1.6 1.6M18.2 18.2l1.6 1.6M2.4 12h2.3M19.3 12h2.3M4.2 19.8l1.6-1.6M18.2 5.8l1.6-1.6"/></svg>

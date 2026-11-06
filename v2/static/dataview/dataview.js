@@ -520,7 +520,8 @@ if (RUN_PAGE) {
   $("selAll").onchange = (e) => { document.querySelectorAll(".dsSel:not(:disabled)").forEach((c) => (c.checked = e.target.checked)); updateSel(); };
   const refSel = $("refSel");
   if (refSel) refSel.onchange = () => { location.search = refSel.value ? "?ref=" + refSel.value : ""; };
-} else {
+} else if ($("search")) {
+  // the run list
   document.querySelectorAll(".nav-link[data-kind]").forEach((a) => (a.onclick = (e) => { e.preventDefault(); history.replaceState(null, "", "#" + a.dataset.kind); setKind(a.dataset.kind); }));
   document.querySelectorAll(".nav-link[data-kind]").forEach((a) => a.classList.toggle("active", a.dataset.kind === KIND));
   const refilter = () => { shown = PAGE; renderRuns(); };   // a new filter starts again at the first page

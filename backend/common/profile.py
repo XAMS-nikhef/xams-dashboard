@@ -53,6 +53,11 @@ class Profile:
     submit: Callable | None = None                    # (run_ids, targets, corrections_version) -> result dict
     submit_options: Callable | None = None            # () -> {targets, corrections_versions, default_version, ...}
     jobs: Callable | None = None                      # () -> {run: job state} (condor / waiting list)
+    # () -> may this request act (submit, delete)? None: yes (private: the token already decided). The page then
+    # hides the action buttons; the server refuses the actions itself (v2/app.py _check_key)
+    can_act: Callable | None = None
+    # the settings page (gear): None = the folders shown read-only; else a backend.private.setup.Setup
+    setup: object | None = None
 
 
 def private_location_problem(path, xams: Path = XAMS, uid: int | None = None) -> str | None:

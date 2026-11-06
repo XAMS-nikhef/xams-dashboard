@@ -1,0 +1,98 @@
+{% extends "dataview/base.html" %}
+{% block title %}Setup{% endblock %}
+{% block content %}
+      <header class="page-head">
+        <div>
+          <p class="eyebrow">Processing / {{ 'central' if profile.name == 'production' else 'private' }} · <b>{{ user }}</b></p>
+          <h1>Setup</h1>
+        </div>
+        <div class="aside">
+          {% if setup.editable %}<button id="saveBtn" title="check all folders, save them and restart this dashboard">Save and restart</button>{% endif %}
+        </div>
+      </header>
+
+      <section class="grid">
+        <div class="panel">
+          <div class="panel-title">You</div>
+          {% if setup.user %}
+          <table class="kv">
+            <tr><td class="muted">name</td><td>{{ setup.user.name }}</td></tr>
+            <tr><td class="muted">STBC account</td><td class="mono">{{ setup.user.account }}</td></tr>
+            <tr><td class="muted">ports (stbc-i1)</td><td class="mono">dashboard {{ setup.user.dashboard_port or '—' }} · simulations {{ setup.user.sim_port or '—' }}</td></tr>
+            <tr><td class="muted">central dashboard</td><td>{{ 'view and act' if setup.user.central_actions else 'view only' }}</td></tr>
+          </table>
+          {% elif setup.editable %}
+          <p class="muted">Your account is not in <code>users.yaml</code> of the dashboard yet: ask the XAMS maintainer to add
+            you (name, ports). Until then the dashboard uses a port from your user id.</p>
+          {% else %}
+          <p class="muted">The central dashboard: the folders below are set on the server and not changeable here. Your
+            own folders are set on the setup page of your private dashboard (Processing → Private).</p>
+          <p class="muted small">{{ 'you can view and act' if can_act else 'view only: central actions need a key of a user with central_actions' }}
+            · users: {{ setup.users|join(', ') or '—' }}</p>
+          {% endif %}
+          {% if setup.settings_file %}<p class="muted small">settings: <code>{{ setup.settings_file }}</code> (only readable by you)</p>{% endif %}
+        </div>
+
+        <div class="panel">
+          <div class="panel-title">Central folders <span class="muted small">shown, not changeable</span></div>
+          <table class="kv">
+            {% for c in setup.central %}<tr><td class="muted">{{ c.group }}</td><td class="mono">{{ c.path }}{% if not c.exists %} <span class="muted">(not there)</span>{% endif %}</td></tr>{% endfor %}
+          </table>
+        </div>
+      </section>
+
+      {% if setup.editable %}
+      <section class="panel">
+        <div class="panel-title">Your folders <span class="muted small">checked before saving; the dashboard restarts with them</span></div>
+        {% for f in setup.fields %}
+        <div class="setup-row">
+          <div class="lab">{{ f.group }}{% if f.required %} *{% endif %}<small>{{ f.label }}</small></div>
+          <input id="f_{{ f.key }}" data-key="{{ f.key }}" value="{{ f.value }}" placeholder="/data/xenon/xams_v2/users/&lt;you&gt;/…" spellcheck="false" />
+          <button class="checkBtn" data-key="{{ f.key }}">Check</button>
+          <div class="setup-msg" id="m_{{ f.key }}"></div>
+        </div>
+        {% endfor %}
+        <p class="hint">Folders under the central XAMS folders, live data or someone else's area are shown read-only:
+          the private dashboard never deletes there.</p>
+      </section>
+      <script>
+        (function () {
+          function show(key, c) {
+            var m = document.getElementById("m_" + key);
+            m.textContent = c.error || c.message || "";
+            m.className = "setup-msg " + (c.error || !c.ok ? "bad" : (c.read_only ? "warn" : "ok"));
+          }
+          async function post(path, body) {
+            var r = await fetch((window.BASE || "") + path, {method: "POST", headers: {"Content-Type": "application/json"}, body: JSON.stringify(body)});
+            var j = await r.json().catch(function () { return {error: r.statusText}; });
+            if (!r.ok && !j.error) j.error = r.statusText;
+            return j;
+          }
+          function values() {
+            var v = {};
+            document.querySelectorAll(".setup-row input").forEach(function (i) { v[i.dataset.key] = i.value.trim(); });
+            return v;
+          }
+          document.querySelectorAll(".checkBtn").forEach(function (b) {
+            b.onclick = async function () {
+              var k = b.dataset.key;
+              show(k, {message: "checking…", ok: true});
+              show(k, await post("/api/setup/check", {key: k, value: document.getElementById("f_" + k).value.trim()}));
+            };
+          });
+          document.getElementById("saveBtn").onclick = async function () {
+            var b = this; b.disabled = true;
+            var j = await post("/api/setup/save", {values: values()});
+            Object.keys(j.checks || {}).forEach(function (k) { show(k, j.checks[k]); });
+            if (j.saved) {
+              toast("Saved. The dashboard restarts with the new folders; the page reloads in a few seconds.", "ok");
+              setTimeout(function () { location.href = (window.BASE || "") + "/"; }, 6000);
+            } else {
+              toast(j.error || (j.unchanged ? "Nothing changed." : "Not saved: fix the folders marked in red."), j.unchanged ? "info" : "bad");
+              b.disabled = false;
+            }
+          };
+        })();
+      </script>
+      {% endif %}
+{% endblock %}

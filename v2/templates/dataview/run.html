@@ -8,6 +8,7 @@
           <h1>Run {{ "%06d"|format(run) }}</h1>
         </div>
         <div class="aside">
+          {% if not can_act %}<span class="tag" title="you can look, not act: central actions need a key of a user with central_actions (users.yaml)">view only</span>{% endif %}
           <span id="busy" class="busy" hidden><span class="spin"></span><span id="busyText">working…</span></span>
           {% for k in kinds %}<span class="tag">{{ {'event': 'events', 'source': 'source run', 'led': 'LED run'}[k] }}</span>{% endfor %}
           {% if run >= 900000 %}<span class="tag">simulated</span>{% endif %}

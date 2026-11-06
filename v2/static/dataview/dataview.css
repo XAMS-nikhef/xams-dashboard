@@ -120,3 +120,19 @@ dialog::backdrop{background:rgba(18,20,26,.35);backdrop-filter:blur(2px)}
 #dsTable td:nth-child(n+5){white-space:nowrap}
 .kv.detector td{padding:5px 6px}
 .kv.detector td:first-child{width:auto}
+
+/* view only (central page without a key of a user with central_actions): no action buttons, no selection boxes */
+html.view-only #refreshBtn, html.view-only #processBtn, html.view-only #delOutdatedBtn, html.view-only #delSelBtn,
+html.view-only #reprocBtn, html.view-only .runSel, html.view-only .dsSel, html.view-only #selAll{display:none !important}
+
+/* setup page */
+.setup-row{display:grid;grid-template-columns:150px 1fr auto;gap:10px;align-items:center;padding:10px 0;
+  border-bottom:1px solid var(--line-2)}
+.setup-row:last-child{border-bottom:none}
+.setup-row input{width:100%;font-family:var(--font-mono);font-size:12.5px}
+.setup-row .lab{font-weight:600}
+.setup-row .lab small{display:block;font-weight:400;color:var(--ink-3)}
+.setup-msg{grid-column:2 / 4;font-size:12.5px;margin-top:-4px}
+.setup-msg.ok{color:var(--ok-ink, #15803d)}
+.setup-msg.bad{color:var(--bad, #dc2626)}
+.setup-msg.warn{color:#b45309}
