@@ -28,6 +28,8 @@ view = _bp.view
 # Process: the user's own condor jobs with their analysis contexts (backend/private/processing.py)
 processing = PrivateProcessing(view, max_jobs=S.max_jobs, memory_mb=S.job_memory_mb)
 _profile.submit, _profile.submit_options, _profile.jobs = processing.submit, processing.options, processing.jobs
+from backend.private.setup import Setup                          # noqa: E402
+_profile.setup = Setup(S.path)                                   # the gear: folders, checked, saved, then a restart
 app.register_blueprint(_bp)
 for _label, _why in view.read_only().items():                  # shown, never deleted (profile.private_location_problem)
     logging.getLogger(__name__).warning("folder %s is read-only here: %s", _label, _why)

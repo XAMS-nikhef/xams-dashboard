@@ -10,6 +10,7 @@ from urllib.parse import urlencode
 from flask import Flask, jsonify, make_response, render_template, request, redirect
 
 from backend.common import keys as K
+from backend.common import users as U
 
 from backend.deletion_service import delete_run_disk_data
 from backend.events_loader import load_event_features
@@ -55,10 +56,24 @@ def _key_from_url():
 def _check_key():
     if request.method in ("GET", "HEAD", "OPTIONS"):
         return None
-    if K.user_for(request.cookies.get(K.COOKIE)) or K.user_for(request.headers.get("X-Key")):
+    name = _key_user()
+    if name and U.may_act_centrally(name):
         return None
+    if name:
+        return jsonify({"error": f"forbidden: {name} may view the central dashboard, not act on it "
+                                 "(central_actions in users.yaml)"}), 403
     return jsonify({"error": "forbidden: actions need your dashboard key; open the dashboard through the launcher "
                              "(see backend/common/keys.py)"}), 403
+
+
+def _key_user() -> str | None:
+    """The name whose key came with this request (cookie or X-Key header), or None."""
+    return K.user_for(request.cookies.get(K.COOKIE)) or K.user_for(request.headers.get("X-Key"))
+
+
+def can_act() -> bool:
+    """This request may act centrally: a valid key of a user with central_actions (users.yaml)."""
+    return U.may_act_centrally(_key_user())
 
 # The new data view (docs/UNIFIED_DASHBOARD_REPORT.md) on trial at /v3, next to this page; XAMS_DASH_V3=0 switches it
 # off. Shared with the private dashboard (v2/dataview.py, profile "production").
@@ -85,6 +100,7 @@ if os.getenv('XAMS_DASH_V3', '1') != '0':
     from v2.dataview import blueprint as _dataview
     _v3_profile = production_profile()
     _v3_profile.submit, _v3_profile.submit_options, _v3_profile.jobs = _v3_submit, _v3_submit_options, _v3_jobs
+    _v3_profile.can_act = can_act
     app.register_blueprint(_dataview(_v3_profile, base='/v3'), url_prefix='/v3')
 
 mongo = MongoService()

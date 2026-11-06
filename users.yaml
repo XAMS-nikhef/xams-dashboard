@@ -1,0 +1,16 @@
+# The users of the XAMS dashboards (backend/common/users.py). No secrets here: keys live in each account's home.
+#
+#   name:             the dashboard name (also the name in the central keys file of xamsdata)
+#     account:        Nikhef / STBC login, under which the private servers run
+#     dashboard_port: remote port (stbc-i1, 127.0.0.1) of the private processing dashboard
+#     sim_port:       remote port of the private simulations app
+#     central_actions: may submit / delete on the central dashboard (default false: view only)
+#
+# A new user: add a block with the next free ports (21300, 21301, ...), PR, deploy. Then the user runs
+# `xams-web.sh setup` in their launcher.
+users:
+  acolijn:
+    account: z37
+    dashboard_port: 21235
+    sim_port: 8077
+    central_actions: true

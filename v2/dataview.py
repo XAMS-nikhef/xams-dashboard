@@ -528,11 +528,42 @@ def blueprint(profile, base: str = "") -> Blueprint:
     def _page(template, **kw):
         return render_template(template, base=base, profile=profile, user=os.getenv("USER", ""),
                                locations=[str(x.path) for x in profile.locations],
-                               providers=[provider_name(p, i) for i, p in enumerate(profile.providers)], **kw)
+                               providers=[provider_name(p, i) for i, p in enumerate(profile.providers)],
+                               can_act=profile.can_act() if profile.can_act else True, **kw)
 
     @bp.get("/")
     def index():
         return _page("dataview/index.html", page="runs")
+
+    @bp.get("/setup")
+    def setup_page():
+        """The gear: the folders of this dashboard (private: changeable, checked before saving; central: shown)."""
+        if profile.setup:
+            st = profile.setup.state()
+        else:
+            from backend.common import users
+            st = {"editable": False, "fields": [],
+                  "central": [{"group": x.label, "path": str(x.path), "exists": x.path.is_dir()}
+                              for x in profile.locations],
+                  "user": None, "users": sorted(users.load())}
+        return _page("dataview/setup.html", page="setup", setup=st)
+
+    @bp.post("/api/setup/check")
+    def setup_check():
+        if not profile.setup:
+            abort(404)
+        b = request.get_json(silent=True) or {}
+        try:
+            return jsonify(profile.setup.check(str(b.get("key", "")), str(b.get("value", "")).strip()))
+        except ValueError as e:
+            return jsonify({"error": str(e)}), 400
+
+    @bp.post("/api/setup/save")
+    def setup_save():
+        if not profile.setup:
+            abort(404)
+        b = request.get_json(silent=True) or {}
+        return jsonify(profile.setup.save(b.get("values") or {}))
 
     @bp.get("/run/<int:run>")
     def run_page(run: int):

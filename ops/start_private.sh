@@ -15,7 +15,9 @@ running() { screen -ls | grep -q "[.]$SCREEN_NAME[[:space:]]"; }
 setting() { python3 -c "import json,os,sys; d=json.load(open(sys.argv[1])); print(d.get(sys.argv[2]) or (20000 + os.getuid() % 20000 if sys.argv[2] == 'dashboard_port' else ''))" "$SETTINGS" "$1"; }
 
 [ -f "$SETTINGS" ] || { echo "no settings file $SETTINGS (see backend/private/settings.py)"; exit 1; }
-PORT=$(setting dashboard_port)
+# the port: dashboard_port of the settings, else users.yaml, else one per user id (backend/private/settings.py)
+PORT=$(cd "$APP_DIR" && bash -c "$ENV_ACTIVATE >/dev/null 2>&1; python -m backend.private.settings port" 2>/dev/null || true)
+[ -n "$PORT" ] || PORT=$(setting dashboard_port)
 FOLDER=$(setting strax_folder)
 [ -n "$LOG" ] || LOG="$FOLDER/.dashboard_private.log"     # not in the home (small quota)
 
