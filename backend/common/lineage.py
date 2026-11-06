@@ -72,11 +72,49 @@ def fingerprint(provider: dict) -> str:
     return fp
 
 
+_CODE: dict = {}                              # python -> amstrax package folder (looked up once per python)
+
+
+def _amstrax_dir(py: str):
+    """The amstrax package folder that `py` imports (None if it has no amstrax)."""
+    if py not in _CODE:
+        if py == sys.executable:
+            import importlib.util
+            spec = importlib.util.find_spec("amstrax")
+            _CODE[py] = str(Path(spec.origin).parent) if spec and spec.origin else None
+        else:
+            env = dict(os.environ)
+            env.pop("PYTHONPATH", None)
+            try:
+                r = subprocess.run([py, "-c", "import importlib.util as u; s = u.find_spec('amstrax'); print(s.origin if s else '')"],
+                                   capture_output=True, text=True, timeout=60, env=env)
+                out = r.stdout.strip().splitlines()
+            except (OSError, subprocess.SubprocessError):          # no such python: no code signature
+                out = []
+            _CODE[py] = str(Path(out[-1]).parent) if out and out[-1] else None
+    return _CODE[py]
+
+
+def code_signature(provider: dict):
+    """Signature of the amstrax code an amstrax provider runs: newest mtime and number of its .py files. An amstrax
+    update (git pull, new snapshot) changes it, so cached hashes made with the old code are not reused."""
+    if provider.get("kind") != "amstrax":
+        return None
+    d = _amstrax_dir(provider.get("python") or sys.executable)
+    if not d:
+        return None
+    files = list(Path(d).rglob("*.py"))
+    return [d, len(files), max((p.stat().st_mtime for p in files), default=0.0)]
+
+
 def _fingerprint(provider: dict) -> str:
     watch = list(provider.get("watch") or [])
     if provider.get("path"):
         watch.append(provider["path"])
     blob = {"provider": provider, "mtimes": _mtimes(watch)}
+    code = code_signature(provider)
+    if code:
+        blob["amstrax_code"] = code
     version = (provider.get("kwargs") or {}).get("corrections_version") if provider.get("kind") == "amstrax" else None
     if version:
         blob["corrections"] = corrections_signature(str(version))
