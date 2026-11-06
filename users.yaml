@@ -14,7 +14,7 @@ users:
     dashboard_port: 21235
     sim_port: 8077
     central_actions: true
-  awestveer:                 # Ardjan Westveer
+  awestvee:                  # Ardjan Westveer
     account: awestvee
     dashboard_port: 21300
     sim_port: 21301
