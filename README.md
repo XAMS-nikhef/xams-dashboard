@@ -78,3 +78,8 @@ the actions too). A new user: a block with the next free ports, PR, deploy.
 Files it keeps in the strax folder: `.dashboard_lineage.json` (hash cache), `.dashboard_keep.json` (keep marks),
 `.dashboard_deletions.log`, `.dashboard_private.log` (app log, only readable by you). Deletion is limited to data-set
 folders (`<run>-<type>-<hash>`) directly inside the strax folder; kept ones are never deleted.
+
+**Trash:** a deleted data set is first moved to `.trash/` in its own folder (a rename, nothing copied), shown in the
+**Trash** panel of the run list with a **restore** button, and removed for good after 7 days
+(`XAMS_DASH_TRASH_DAYS`); the disk space comes free only then. Same for the central page and the old page's
+"Delete data". A restored central data set gets no `data[]` entry back in the run document.

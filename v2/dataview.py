@@ -85,6 +85,7 @@ class DataView:
         self._runs_json: dict = {}               # kind -> (key, json bytes, gzipped bytes) of /api/runs
         self._lineage_for = None                 # (list signature, lineage version) the lineage was last started for
         self._scan_sig = (None, 0)               # (scan time, content signature) of the last folder scan
+        self._trash_emptied = 0.0                # last time the trash was emptied (F.empty_trash, hourly)
         self._fig_lock = threading.Lock()
         self._data_locks: dict = {}
         self._data_cache: dict = {}              # (data set id, mtime) -> rows read for the run page figures
@@ -109,7 +110,54 @@ class DataView:
             except OSError:
                 continue
         self._scan = (time.time(), ds)
+        self._empty_trash()
         return ds
+
+    def _trash_folders(self) -> list:
+        """(index, location) of the locations whose trash this server manages (not read-only ones)."""
+        out = []
+        for i, loc in enumerate(self.p.locations):
+            if self.p.location_check and self.p.location_check(loc.path):
+                continue
+            out.append((i, loc))
+        return out
+
+    def _empty_trash(self):
+        """At most once an hour: remove what has been in the trash longer than F.TRASH_DAYS (logged)."""
+        if time.time() - self._trash_emptied < 3600:
+            return
+        self._trash_emptied = time.time()
+        for _, loc in self._trash_folders():
+            gone = F.empty_trash(loc.path)
+            if gone:
+                try:
+                    with open(self.p.state_dir / F.LOG_FILE, "a") as f:
+                        for e in gone:
+                            f.write(json.dumps({"time": time.strftime("%Y-%m-%d %H:%M:%S"),
+                                                "user": getpass.getuser(), "name": e, "location": str(loc.path),
+                                                "note": f"trash emptied (older than {F.TRASH_DAYS:g} days)"}) + "\n")
+                except OSError:
+                    pass
+
+    def trash(self) -> list:
+        out = []
+        for i, loc in self._trash_folders():
+            out += [dict(x, loc=i) for x in F.trash_list(loc.path)]
+        return sorted(out, key=lambda x: x["trashed"], reverse=True)
+
+    def restore(self, loc: int, entry: str) -> dict:
+        folders = dict(self._trash_folders())
+        if loc not in folders:
+            raise ValueError("no such location (or read-only here)")
+        name = F.restore(folders[loc].path, entry)
+        with open(self.p.state_dir / F.LOG_FILE, "a") as f:
+            f.write(json.dumps({"time": time.strftime("%Y-%m-%d %H:%M:%S"), "user": getpass.getuser(),
+                                "name": name, "location": str(folders[loc].path), "note": "restored from the trash"})
+                    + "\n")
+        self._scan = (time.time() - SCAN_TTL - 1, self._scan[1])      # rescan at the next request
+        self._rows.clear()
+        note = " (its data[] entry in the run document is not restored)" if self.p.on_delete else ""
+        return {"restored": name, "note": note}
 
     def _scan_bg(self):
         try:
@@ -491,13 +539,14 @@ class DataView:
         for d, item in ok:
             loc = self.location(d)
             try:
-                shutil.rmtree(F._target(loc.path, d.name))
+                entry = F.to_trash(F._target(loc.path, d.name))          # trash first: restorable for TRASH_DAYS
                 note = self.p.on_delete(d, loc) if self.p.on_delete else ""
                 out["deleted"].append(d.id)
                 with open(log, "a") as f:
                     f.write(json.dumps({"time": time.strftime("%Y-%m-%d %H:%M:%S"), "user": getpass.getuser(),
                                         "name": d.id, "location": str(loc.path), "size": d.size,
-                                        "status": (status.get(d.id) or {}).get("status"), "note": note}) + "\n")
+                                        "status": (status.get(d.id) or {}).get("status"), "note": note,
+                                        "trash": entry.name}) + "\n")
             except Exception as e:                               # noqa: BLE001
                 out["errors"].append({"name": d.id, "error": str(e)})
         # the list must not show deleted data sets again: drop them from the last scan at once (a full rescan follows
@@ -762,5 +811,18 @@ def blueprint(profile, base: str = "") -> Blueprint:
     @bp.get("/api/deletions")
     def deletions():
         return jsonify({"rows": F.deletion_log(profile.state_dir)})
+
+    @bp.get("/api/trash")
+    def trash():
+        """Deleted data sets still in the trash (restorable until they expire)."""
+        return jsonify({"rows": view.trash(), "days": F.TRASH_DAYS})
+
+    @bp.post("/api/trash/restore")
+    def trash_restore():
+        b = request.get_json(silent=True) or {}
+        try:
+            return jsonify(view.restore(int(b.get("loc", -1)), str(b.get("entry", ""))))
+        except (ValueError, OSError) as e:
+            return jsonify({"error": str(e)}), 400
 
     return bp

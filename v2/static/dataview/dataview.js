@@ -392,7 +392,7 @@ function confirmDialog(title, preview) {
     const rows = preview.delete.map((x) => `<tr><td>${esc(x.name)}${x.note ? `<br><span class="warn">${esc(x.note)}</span>` : ""}</td><td>${gb(x.size)}</td></tr>`).join("");
     const ref = preview.refused.map((x) => `<li>${esc(x.name)}: ${esc(x.reason)}</li>`).join("");
     $("dlgBody").innerHTML = (preview.delete.length
-      ? `<p>Delete <b>${preview.delete.length}</b> data sets, <b>${gb(preview.size)}</b>. This cannot be undone.</p><table>${rows}</table>`
+      ? `<p>Delete <b>${preview.delete.length}</b> data sets, <b>${gb(preview.size)}</b>. They go to the trash (<code>.trash</code> in their folder) and can be restored for 7 days; the disk space comes free after that.</p><table>${rows}</table>`
       : "<p>Nothing to delete.</p>") + (ref ? `<p>Not deleted:</p><ul>${ref}</ul>` : "");
     $("dlgOk").disabled = !preview.delete.length;
     const dlg = $("confirmDlg");
@@ -424,7 +424,7 @@ async function runDelete(title, previewFn) {
       res.errors.length ? "warn" : "ok", res.errors.length ? 0 : 8000);
   } catch (e) { toast("Delete failed: " + esc(e.message), "bad", 0); }
   finally { done(); }
-  if (RUN_PAGE) loadDetail(RUN_PAGE); else { loadRuns(); loadDeletions(); }
+  if (RUN_PAGE) loadDetail(RUN_PAGE); else { loadRuns(); loadDeletions(); loadTrash(); }
 }
 
 function deleteNames(names) {
@@ -441,6 +441,23 @@ async function loadDeletions() {
   $("delTable").querySelector("tbody").innerHTML = j.rows.map((r) =>
     `<tr><td>${esc(r.time)}</td><td>${esc(r.user)}</td><td>${esc(r.name)}</td><td>${gb(r.size || 0)}</td></tr>`).join("")
     || `<tr><td colspan="4" class="hint">none yet</td></tr>`;
+}
+
+async function loadTrash() {
+  if (!$("trashTable")) return;
+  const j = await api("/api/trash");
+  $("trashInfo").textContent = `deleted data sets stay here ${j.days} days, then they are removed for good`;
+  $("trashTable").querySelector("tbody").innerHTML = j.rows.map((r) =>
+    `<tr><td>${esc(r.trashed)}</td><td>${esc(r.name)}</td><td>${gb(r.size || 0)}</td><td>${esc(r.expires)}</td>`
+    + `<td><button class="linkbtn restoreBtn" data-loc="${r.loc}" data-entry="${esc(r.entry)}">restore</button></td></tr>`).join("")
+    || `<tr><td colspan="5" class="hint">empty</td></tr>`;
+  document.querySelectorAll(".restoreBtn").forEach((b) => (b.onclick = async () => {
+    try {
+      const r = await api("/api/trash/restore", {loc: Number(b.dataset.loc), entry: b.dataset.entry});
+      toast(`Restored ${esc(r.restored)}${esc(r.note || "")}`, "ok");
+    } catch (e) { toast("Restore failed: " + esc(e.message), "bad", 0); }
+    loadTrash(); loadRuns(); loadDeletions();
+  }));
 }
 
 // ------------------------------------------------------------------ plots of one data set (read from its folder)
@@ -539,4 +556,5 @@ if (RUN_PAGE) {
   $("processBtn").onclick = () => openSubmit([...document.querySelectorAll(".runSel:checked")].map((c) => Number(c.value)));
   loadRuns();
   loadDeletions();
+  loadTrash();
 }
