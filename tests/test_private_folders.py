@@ -35,3 +35,46 @@ def test_delete_refused_in_read_only_folder(tmp_path):
     res = v.delete(["1:007720-peak_basics-bbbbbbbbbb"], confirm=True)
     assert res["deleted"] == [] and (central / "007720-peak_basics-bbbbbbbbbb").is_dir()
     assert v.read_only() == {"central": "a central XAMS folder"}
+
+
+def test_shared_folders_read_only(tmp_path):
+    """Other users' folders (shared_folders): listed, always read-only here, even when this account could write."""
+    from types import SimpleNamespace
+
+    from backend.common.profile import SHARED, private_profile
+    mine, other = tmp_path / "mine", tmp_path / "other"
+    _ds(mine, "007720-peak_basics-aaaaaaaaaa")
+    _ds(other, "007721-peak_basics-bbbbbbbbbb")
+    s = SimpleNamespace(strax_folder=mine, contexts=[], token="t", shared_folders=[other, other])
+    p = private_profile(s)
+    labels = [x.label for x in p.locations]
+    assert labels[0] == "strax_data" and labels[1].startswith("shared: ") and labels[2] == labels[1] + "'"
+    assert p.location_check(mine) is None and p.location_check(other) == SHARED
+    assert p.state_dir == mine                                                       # state never in a shared folder
+    v = DataView(p)
+    res = v.delete(["1:007721-peak_basics-bbbbbbbbbb"], confirm=True)
+    assert res["deleted"] == [] and (other / "007721-peak_basics-bbbbbbbbbb").is_dir()
+
+
+def test_shared_folders_setup(tmp_path):
+    import json
+
+    from backend.private.settings import PrivateSettings
+    from backend.private.setup import Setup
+    mine, a, b = tmp_path / "mine", tmp_path / "a", tmp_path / "b"
+    for d in (mine, a, b):
+        d.mkdir()
+    os.chmod(b, 0o555)                                                               # readable, not writable: fine
+    try:
+        f = tmp_path / "private.json"
+        f.write_text(json.dumps({"strax_folder": str(mine)}))
+        st = Setup(f, restart=lambda: None)
+        assert st.check("shared_folders", f"{a}; {b}")["ok"]
+        assert not st.check("shared_folders", f"{a};{tmp_path / 'nope'}")["ok"]
+        assert st.save({"strax_folder": str(mine), "shared_folders": f" {a} ;{b}; "})["saved"]
+        assert json.loads(f.read_text())["shared_folders"] == [str(a), str(b)]       # stored as a list
+        assert next(x for x in st.state()["fields"] if x["key"] == "shared_folders")["value"] == f"{a}; {b}"
+        assert st.save({"strax_folder": str(mine), "shared_folders": f"{a};{b}"})["unchanged"]
+        assert PrivateSettings.load(f).shared_folders == [a, b]
+    finally:
+        os.chmod(b, 0o755)

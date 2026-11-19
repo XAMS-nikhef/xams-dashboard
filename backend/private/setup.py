@@ -4,6 +4,7 @@
     Central MC     /data/xenon/xams_v2/mc_processed, mc_raw_records          shown, not changeable
     Private data   strax_folder                                              required, writable (state files)
     Private MC     mc_processed_folder, mc_raw_folder                        optional
+    Shared         shared_folders (paths separated by ;)                     optional, readable; always read-only here
 
 Saved into the private settings file (~/.xams/private.json, mode 600; every other key is kept), then the server
 restarts itself with the new folders.
@@ -19,6 +20,7 @@ import time
 from pathlib import Path
 
 from backend.common.profile import XAMS, private_location_problem
+from backend.private.settings import split_folders
 
 DATASET = re.compile(r"^(\d{6})-[A-Za-z0-9_]+-[a-z0-9]{10}$")
 
@@ -27,6 +29,7 @@ FIELDS = [
     ("strax_folder", "Private data", "your strax folder (processed data)", True),
     ("mc_processed_folder", "Private MC", "reconstruction of your MC (amstrax output)", False),
     ("mc_raw_folder", "Private MC", "raw records + run documents of your MC (xams-sim)", False),
+    ("shared_folders", "Shared (read-only)", "other users' folders to look at; several: separate with ;", False),
 ]
 CENTRAL = [
     ("Central data", XAMS / "xams_processed"), ("Central data", XAMS / "xams_raw_records"),
@@ -101,7 +104,8 @@ class Setup:
             "editable": True,
             "settings_file": str(self.path),
             "central": [{"group": g, "path": str(p), "exists": p.is_dir()} for g, p in CENTRAL],
-            "fields": [{"key": k, "group": g, "label": lab, "required": req, "value": str(d.get(k) or "")}
+            "fields": [{"key": k, "group": g, "label": lab, "required": req,
+                        "value": "; ".join(split_folders(d.get(k))) if k == "shared_folders" else str(d.get(k) or "")}
                        for k, g, lab, req in FIELDS],
             "user": ({"name": u.name, "account": u.account, "dashboard_port": u.dashboard_port,
                       "sim_port": u.sim_port, "central_actions": u.central_actions} if u else None),
@@ -113,6 +117,10 @@ class Setup:
             raise ValueError(f"unknown field {key!r}")
         if not value and not req[key]:
             return {"path": "", "ok": True, "message": "not used"}
+        if key == "shared_folders":
+            cs = [check_folder(p) for p in split_folders(value)]
+            msg = " | ".join(f"{c['path']}: {c['message']}" for c in cs)
+            return {"path": value, "ok": all(c["ok"] for c in cs), "message": msg + " (read-only here)" if cs else "not used"}
         return check_folder(value, need_write=(key == "strax_folder"))
 
     def save(self, values: dict) -> dict:
@@ -125,7 +133,11 @@ class Setup:
         changed = False
         for k, *_ in FIELDS:
             v = str(values.get(k) or "").strip()
-            if (d.get(k) or "") != v:
+            if k == "shared_folders":
+                v = split_folders(v)
+                if split_folders(d.get(k)) != v:
+                    changed = True
+            elif (d.get(k) or "") != v:
                 changed = True
             if v:
                 d[k] = v

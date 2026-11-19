@@ -5,6 +5,7 @@ another). Read by the private dashboard (and later the private simulation app an
       "strax_folder": "/data/xenon/xams_v2/users/<you>/measurements/strax_data",
       "mc_raw_folder": ".../xamssim/strax_data",          # optional: private MC (xams-sim): raw records + run documents
       "mc_processed_folder": ".../xamssim/processed",     # optional: its reconstruction (provider: central_contexts.mc)
+      "shared_folders": [".../users/<someone>/strax_data"],  # optional: other users' folders, shown read-only
       "token": "<secret>",                      # required by the app on every request (made by ops/start_private.sh)
       "dashboard_port": 21234,                  # remote port of the private dashboard (default from the user id)
       "contexts": [                             # context providers: a data set is current if one of them makes it
@@ -43,6 +44,14 @@ def default_port() -> int:
     return 20000 + os.getuid() % 20000
 
 
+def split_folders(v) -> list:
+    """shared_folders as stored (a list) or as typed on the setup page (one string, paths separated by ;)."""
+    if not v:
+        return []
+    items = v if isinstance(v, (list, tuple)) else str(v).split(";")
+    return [str(x).strip() for x in items if str(x).strip()]
+
+
 @dataclass
 class PrivateSettings:
     strax_folder: Path
@@ -51,6 +60,7 @@ class PrivateSettings:
     contexts: list = field(default_factory=list)
     mc_raw_folder: Path | None = None
     mc_processed_folder: Path | None = None
+    shared_folders: list = field(default_factory=list)   # other users' folders: listed, never written or deleted in
     max_jobs: int = 10
     job_memory_mb: int = 8000
     path: Path | None = None
@@ -68,6 +78,7 @@ class PrivateSettings:
                    contexts=list(d.get("contexts") or []), max_jobs=int(d.get("max_jobs") or 10),
                    mc_raw_folder=Path(d["mc_raw_folder"]) if d.get("mc_raw_folder") else None,
                    mc_processed_folder=Path(d["mc_processed_folder"]) if d.get("mc_processed_folder") else None,
+                   shared_folders=[Path(p) for p in split_folders(d.get("shared_folders"))],
                    job_memory_mb=int(d.get("job_memory_mb") or 8000), path=path)
 
 

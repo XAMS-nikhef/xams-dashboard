@@ -88,16 +88,39 @@ def private_location_problem(path, xams: Path = XAMS, uid: int | None = None) ->
     return None
 
 
+SHARED = "a shared folder: read-only on this dashboard"
+
+
+def folder_owner(path) -> str:
+    try:
+        return pwd.getpwuid(Path(path).stat().st_uid).pw_name
+    except (OSError, KeyError):
+        return Path(path).name
+
+
 def private_profile(settings) -> Profile:
-    """The user's strax folder and, if set, the folders of their private MC (xams-sim reconstruction and raw records)."""
+    """The user's strax folder and, if set, the folders of their private MC (xams-sim reconstruction and raw records),
+    and other users' shared folders: listed, always read-only here (no deletions; state files stay in strax_folder)."""
     locs = [Location(Path(settings.strax_folder), "strax_data")]
     if getattr(settings, "mc_processed_folder", None):
         locs.append(Location(Path(settings.mc_processed_folder), "mc_processed"))
     if getattr(settings, "mc_raw_folder", None):
         locs.append(Location(Path(settings.mc_raw_folder), "mc_raw_records", raw=True))
+    shared = set()
+    for p in getattr(settings, "shared_folders", None) or []:
+        p = Path(p)
+        label = f"shared: {folder_owner(p)}"
+        while any(x.label == label for x in locs):
+            label += "'"
+        locs.append(Location(p, label))
+        shared.add(str(p))
+
+    def check(path):
+        return SHARED if str(path) in shared else private_location_problem(path)
+
     return Profile(name="private", title="private", locations=locs,
                    state_dir=Path(settings.strax_folder), providers=list(settings.contexts), token=settings.token,
-                   location_check=private_location_problem)
+                   location_check=check)
 
 
 # ------------------------------------------------------------------------------------------------ production
