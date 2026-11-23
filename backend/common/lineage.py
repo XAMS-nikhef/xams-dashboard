@@ -100,7 +100,11 @@ def code_signature(provider: dict):
     update (git pull, new snapshot) changes it, so cached hashes made with the old code are not reused."""
     if provider.get("kind") != "amstrax":
         return None
-    d = _amstrax_dir(provider.get("python") or sys.executable)
+    if provider.get("amstrax_path"):
+        d = str(Path(provider["amstrax_path"]) / "amstrax")
+        d = d if Path(d).is_dir() else None
+    else:
+        d = _amstrax_dir(provider.get("python") or sys.executable)
     if not d:
         return None
     files = list(Path(d).rglob("*.py"))

@@ -9,6 +9,8 @@ Providers (settings "contexts"):
         the function of a file (its folder on sys.path, so its own imports work); "{run}" in args = the run id
     {"kind": "amstrax", "context": "xams", "kwargs": {...}, "config": {...}}
         amstrax.contexts.<context>(**kwargs) with set_config(config)
+    "amstrax_path": "/.../amstrax_versioned/v11"   (optional) import amstrax from this folder instead of the python's own
+        (a corrections version processed with another amstrax snapshot: its plugins set the lineage)
     "runs": [first, last]   (optional) the provider only judges these runs; for others every hash is null
         (e.g. a context for simulated runs, which would otherwise also claim every data run)
     "types": [...]          (optional) the provider only judges these data types (e.g. the LED context)
@@ -65,6 +67,8 @@ def main():
     sys.stdout = sys.stderr                                  # chatty imports must not spoil the JSON line
     try:
         prov = req["provider"]
+        if prov.get("amstrax_path"):
+            sys.path.insert(0, os.path.abspath(prov["amstrax_path"]))
         make = _factory(prov)
         lo, hi = prov.get("runs") or (None, None)
         types = set(prov.get("types") or [])

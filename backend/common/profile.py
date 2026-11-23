@@ -129,11 +129,25 @@ def current_versions() -> list:
     return [v.strip() for v in os.environ.get("XAMS_DASH_CURRENT_VERSIONS", "PROD0,v4").split(",") if v.strip()]
 
 
+def amstrax_paths() -> dict:
+    """Corrections version -> amstrax folder it was processed with, when not the dashboard's own amstrax
+    (XAMS_DASH_AMSTRAX_PATHS="PROD6=/data/xenon/xams_v2/software/amstrax_versioned/v11,..."). A newer amstrax can change
+    the lineage of every version, so each version is judged with the code that made it."""
+    out = {}
+    for item in os.environ.get("XAMS_DASH_AMSTRAX_PATHS", "").split(","):
+        if "=" in item:
+            v, path = item.split("=", 1)
+            if v.strip() and path.strip():
+                out[v.strip()] = path.strip()
+    return out
+
+
 def production_providers(processed: Path) -> list:
     data_runs = [0, MC_RUNS[0] - 1]
+    paths = amstrax_paths()
     out = [{"name": v, "kind": "amstrax", "context": "xams",
             "kwargs": {"output_folder": str(processed), "corrections_version": v, "event_structure_v2": True},
-            "runs": data_runs}
+            "runs": data_runs, **({"amstrax_path": paths[v]} if v in paths else {})}
            for v in current_versions()]
     out.append({"name": "LED", "kind": "amstrax", "context": "xams_led", "kwargs": {"output_folder": str(processed)},
                 "types": ["records_led", "led_calibration"], "runs": data_runs})
