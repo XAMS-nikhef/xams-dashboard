@@ -34,3 +34,15 @@ def test_groups_like_simulations():
     assert g["state"]["drift field [V/cm]"] == "96.6" and g["state"]["pressure [bar]"] == "1.85"
     assert g["state"]["liquid level above gate [mm]"] == "4"
     assert D.groups({}) == {}
+
+
+def test_gap_per_period():
+    """Up to run 8109 (SR-2026.3) the anode hung ring side down: 9.30 mm gate-anode, 4 mm LXe + 5.30 mm GXe."""
+    assert D.gap(8109) == (0.930, "xams_sr2026_3") and D.gap(7790) == (0.930, "xams_sr2026_3")
+    assert D.gap(8110)[0] == 0.80 and D.gap(None)[0] == 0.80
+    p = D.panel({"start": _snap(-1546.2, -1046.0, 2501.0)}, run=8103)
+    assert dict((k, v) for k, v, _ in p["tiles"])["extraction (liquid)"] == "2.47"    # 3547 V / (0.4 + 1.96 * 0.53) cm
+    r = {k: v for k, v, _, _ in p["rows"]}
+    assert r["extraction field, gas"] == "4.83" and "9.3 mm (xams_sr2026_3)" in p["geometry"]
+    g = D.groups({"start": _snap(-1546.2, -1046.0, 2501.0)}, run=8103)
+    assert g["state"]["gate − anode gap [mm]"] == "9.3" and g["state"]["extraction field, liquid [kV/cm]"] == "2.47"

@@ -537,8 +537,8 @@ class DataView:
                 det_groups, note = {}, ""
         else:
             sc = self.sc_snapshot(run)
-            det = None if sc is None else ({"message": "run database: " + sc["error"]} if "error" in sc else DET.panel(sc))
-            det_groups = DET.groups(sc) if sc and "error" not in sc else {}
+            det = None if sc is None else ({"message": "run database: " + sc["error"]} if "error" in sc else DET.panel(sc, run))
+            det_groups = DET.groups(sc, run) if sc and "error" not in sc else {}
             note = "start of the run (sc_snapshot)"
         return {"detector": det, "detector_groups": det_groups, "groups_note": note, "kinds": kinds, "facts": facts, "ds": ds, "n_events": n, "ref_auto": auto[0] if auto else None,
                 "ref_choices": auto, "ref_param": ref_param,

@@ -3,16 +3,28 @@ sc_snapshot, written by webinterface/scripts/sc_snapshot.py since run 7579), the
 
 Only sc_snapshot: never voltages from run comments (user, 2026-11-05).
 
-Fields: uniform estimates from the geometry (xams-sim config/detectors/xams2026/geometry.yaml):
+Fields: uniform estimates from the geometry of the run's period (xams-sim config/detectors/<detector>/geometry.yaml):
     drift field       (V_gate - V_cathode) / gate-cathode distance
     extraction field  in the liquid: (V_anode - V_gate) / (d_LXe + eps_ratio * d_GXe), in the gas eps_ratio times that
 """
 from __future__ import annotations
 
 GATE_CATHODE_CM = 5.18
-GATE_ANODE_CM = 0.8
-LEVEL_ABOVE_GATE_CM = 0.4          # 4 mm LXe + 4 mm GXe since SR-2026.2 (user, 2026-10-01)
+LEVEL_ABOVE_GATE_CM = 0.4          # 4 mm LXe above the gate since SR-2026.2 (user, 2026-10-01)
 EPS_RATIO = 1.96                   # eps(LXe) / eps(GXe)
+# gate-anode gap per period: (last run, gap [cm], xams-sim detector). Up to SR-2026.3 the anode hung ring side down:
+# 9.30 mm between the foils (survey 2026-11-17, drawing 2026-11-21: xams_sr2026_3 geometry v8); flipped at the opening
+# of 2026-11-17 (foil down): 8 mm from the next fill on (xams_sr2026_4). Last run before the opening: 8109.
+GAP_PERIODS = [(8109, 0.930, "xams_sr2026_3"), (None, 0.80, "xams_sr2026_4")]
+GATE_ANODE_CM = GAP_PERIODS[-1][1]                                  # the current detector
+
+
+def gap(run: int | None = None) -> tuple[float, str]:
+    """(gate-anode gap [cm], xams-sim detector) of a run; the current detector when the run is not given."""
+    for last, g, det in GAP_PERIODS:
+        if run is not None and last is not None and run <= last:
+            return g, det
+    return GAP_PERIODS[-1][1], GAP_PERIODS[-1][2]
 
 ELECTRODES = [("cathode", "cathode"), ("gate", "gate"), ("anode", "anode"), ("ts", "top screen"),
               ("bs", "bottom screen"), ("pmt_top", "PMT top"), ("pmt_bot", "PMT bottom"), ("sipm_eq", "SiPM equalizer")]
@@ -34,14 +46,15 @@ def _fmt(v, digits=4):
     return str(v)
 
 
-def _fields(snap):
+def _fields(snap, run=None):
+    gap_cm = gap(run)[0]
     vc, vg, va = (_v(snap, f"hv_{k}_vmon")[0] for k in ("cathode", "gate", "anode"))
     out = {}
     if vc is not None and vg is not None:
         out["ΔV gate − cathode"] = (vg - vc, "V")
         out["drift field"] = ((vg - vc) / GATE_CATHODE_CM, "V/cm")
     if va is not None and vg is not None:
-        d_l, d_g = LEVEL_ABOVE_GATE_CM, GATE_ANODE_CM - LEVEL_ABOVE_GATE_CM
+        d_l, d_g = LEVEL_ABOVE_GATE_CM, gap_cm - LEVEL_ABOVE_GATE_CM
         e_l = (va - vg) / (d_l + EPS_RATIO * d_g)
         out["ΔV anode − gate"] = (va - vg, "V")
         out["extraction field, liquid"] = (e_l / 1e3, "kV/cm")
@@ -49,7 +62,7 @@ def _fields(snap):
     return out
 
 
-def panel(sc: dict | None) -> dict:
+def panel(sc: dict | None, run: int | None = None) -> dict:
     """What the run page shows (user, 2026-11-05): the conditions at the start of the run only, as one row of tiles
     (fields, electrode voltages, pressure) plus the other start values in a table. The end snapshot is used only when
     there is no start snapshot (and then said so)."""
@@ -62,7 +75,7 @@ def panel(sc: dict | None) -> dict:
         why = (snap or {}).get("unavailable")
         return {"message": f"slow control unavailable at the start ({why})" if why else
                 "no slow-control snapshot in the run document (written since run 7579)"}
-    f = _fields(snap)
+    f = _fields(snap, run)
     tiles = []
     for label, (v, u), n in (("drift field", f.get("drift field", (None, "V/cm")), 3),
                              ("extraction (liquid)", f.get("extraction field, liquid", (None, "kV/cm")), 3)):
@@ -91,20 +104,21 @@ def panel(sc: dict | None) -> dict:
             rows.append((label, _fmt(v), u, q))
     return {"tiles": tiles, "rows": rows, "which": which, "time": str(snap.get("time") or "")[:19],
             "config": snap.get("sc_config"), "message": "" if which == "start" else "no start snapshot: values at the end",
-            "geometry": f"gate–cathode {GATE_CATHODE_CM * 10:g} mm, gate–anode {GATE_ANODE_CM * 10:g} mm, "
+            "geometry": f"gate–cathode {GATE_CATHODE_CM * 10:g} mm, gate–anode {gap(run)[0] * 10:g} mm ({gap(run)[1]}), "
                         f"liquid {LEVEL_ABOVE_GATE_CM * 10:g} mm above the gate, ε(LXe)/ε(GXe) {EPS_RATIO}"}
 
 
-def groups(sc: dict | None) -> dict:
+def groups(sc: dict | None, run: int | None = None) -> dict:
     """The start conditions grouped as on the Simulations run page: {"state": {...}, "voltages [V]": {...}} with the
     unit in the key; {} when there is no usable snapshot (panel()["message"] says why)."""
-    p = panel(sc)
+    p = panel(sc, run)
     if not p.get("tiles"):
         return {}
     snap = (sc or {}).get(p["which"]) or {}
-    f = _fields(snap)
+    f = _fields(snap, run)
     val = lambda k: _v(snap, k)[0]                                  # noqa: E731
-    state = {"liquid level above gate [mm]": LEVEL_ABOVE_GATE_CM * 10, "pressure [bar]": val("pmain"),
+    state = {"liquid level above gate [mm]": LEVEL_ABOVE_GATE_CM * 10, "gate − anode gap [mm]": gap(run)[0] * 10,
+             "pressure [bar]": val("pmain"),
              "drift field [V/cm]": f.get("drift field", (None,))[0],
              "extraction field, liquid [kV/cm]": f.get("extraction field, liquid", (None,))[0],
              "extraction field, gas [kV/cm]": f.get("extraction field, gas", (None,))[0],
