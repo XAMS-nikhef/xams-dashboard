@@ -30,6 +30,7 @@ from backend.common.lineage import Lineage, provider_name
 from backend.common.profile import MC_RUNS, NEVER_TYPES, RAW_TYPES
 
 RUNDOC_TTL = 600
+PROVIDERS_TTL = 300               # seconds between looks for new corrections versions (production: run database)
 JOBS_TTL = 20                     # seconds the condor / waiting-list state is reused
 SCAN_TTL = 60                     # seconds a folder scan is reused before a new one starts (in the background)
 RUNDOC_PROJ = {"number": 1, "mode": 1, "start": 1, "end": 1, "xams_bookkeeping": 1, "tags": 1, "comments": 1,
@@ -93,6 +94,7 @@ class DataView:
         self._fig_lock = threading.Lock()
         self._data_locks: dict = {}
         self._data_cache: dict = {}              # (data set id, mtime) -> rows read for the run page figures
+        self._providers_checked = time.time()    # last profile.refresh_providers() (the profile made them just now)
 
     def jobs(self) -> dict:
         """Job state per run (condor / waiting list) from the profile, cached JOBS_TTL seconds."""
@@ -336,6 +338,7 @@ class DataView:
     def rows(self, kind: str | None = None) -> list:
         """The data sets of the run list with status. Rebuilt only when something changed: the folders' content (a
         rescan that finds the same folders changes nothing), the hashes (lineage version), keep marks or a deletion."""
+        self._refresh_providers()
         ds = self.datasets_raw()
         sig = self._list_signature()
         # compute what is missing (background): only once per list / lineage version, not on every request
@@ -350,6 +353,23 @@ class DataView:
         out = self._rows_compute(ds, kind)
         self._rows[kind] = (key, out)
         return out
+
+    def _refresh_providers(self):
+        """Every PROVIDERS_TTL seconds: the profile's providers again (production: a new corrections version or another
+        amstrax in the run database shows up without a restart)."""
+        if not self.p.refresh_providers or time.time() - self._providers_checked < PROVIDERS_TTL:
+            return
+        self._providers_checked = time.time()
+        try:
+            new = self.p.refresh_providers()
+        except Exception:                                        # noqa: BLE001
+            return
+        if new is None or new == self.p.providers:
+            return
+        if self.lineage.set_providers(new):
+            self.p.providers = list(new)
+        else:
+            self._providers_checked = time.time() - PROVIDERS_TTL + 30   # computing: try again in 30 s
 
     def _rows_compute(self, ds, kind) -> list:
         keep = F.load_keep(self.p.state_dir)

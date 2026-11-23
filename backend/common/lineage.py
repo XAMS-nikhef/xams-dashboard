@@ -100,7 +100,11 @@ def code_signature(provider: dict):
     update (git pull, new snapshot) changes it, so cached hashes made with the old code are not reused."""
     if provider.get("kind") != "amstrax":
         return None
-    d = _amstrax_dir(provider.get("python") or sys.executable)
+    if provider.get("amstrax_path"):
+        d = str(Path(provider["amstrax_path"]) / "amstrax")
+        d = d if Path(d).is_dir() else None
+    else:
+        d = _amstrax_dir(provider.get("python") or sys.executable)
     if not d:
         return None
     files = list(Path(d).rglob("*.py"))
@@ -236,6 +240,16 @@ class Lineage:
             self._thread = threading.Thread(target=self._run, args=(todo, list(datasets)), daemon=True)
             self._thread.start()
 
+    def set_providers(self, providers) -> bool:
+        """Use other providers (cached hashes of unchanged ones stay valid: the cache is keyed by fingerprint). Only
+        while nothing is being computed (the worker thread indexes self.providers); False: try again later."""
+        with self._lock:
+            if self._thread and self._thread.is_alive():
+                return False
+            self.providers = list(providers)
+            self.version += 1
+            return True
+
     def _run(self, todo, datasets=()):
         try:
             self._hashes(todo)
@@ -255,7 +269,8 @@ class Lineage:
             for k in range(0, len(items), b):
                 res = run_worker(p, items[k:k + b], want="lineage")
                 if res.get("fatal"):
-                    raise RuntimeError(f"{provider_name(p, i)}: {res['fatal']}")
+                    self.state["error"] = f"{provider_name(p, i)}: {res['fatal']}"[:500]
+                    break
                 for r, h in res.get("hashes", {}).items():
                     keys = {}
                     for t, v in h.items():
@@ -285,8 +300,10 @@ class Lineage:
             items, b = sorted(miss.items()), batch_size(p)
             for k in range(0, len(items), b):
                 res = run_worker(p, items[k:k + b])
-                if res.get("fatal"):
-                    raise RuntimeError(f"{provider_name(p, i)}: {res['fatal']}")
+                if res.get("fatal"):                         # this provider cannot run: note it, go on with the next
+                    entry["fatal"] = res["fatal"]
+                    self.state["error"] = f"{provider_name(p, i)}: {res['fatal']}"[:500]
+                    break
                 for r, h in res.get("hashes", {}).items():
                     entry["hashes"].setdefault(r, {}).update(h)
                 entry["errors"].update(res.get("errors", {}))

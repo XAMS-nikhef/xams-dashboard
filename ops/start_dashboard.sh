@@ -23,3 +23,4 @@ screen -S "$SCREEN_NAME" -dm bash -lc "cd '$APP_DIR' && $ENV_ACTIVATE && export 
 
 echo "Started dashboard screen '$SCREEN_NAME' on ${HOST}:${PORT}"
 echo "  current versions: ${XAMS_DASH_CURRENT_VERSIONS:-PROD0,v4 (default)}; submit default: ${XAMS_AUTOPROC_CORRECTIONS:-PROD0 (default)}"
+echo "  amstrax per version: ${XAMS_DASH_AMSTRAX_PATHS:-(none: the environment amstrax for all)}"
