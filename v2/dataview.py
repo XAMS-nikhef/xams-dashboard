@@ -22,6 +22,7 @@ from flask import Blueprint, Response, abort, jsonify, render_template, request,
 
 from backend.common import detector as DET
 from backend.common import folder as F
+from backend.common import mcrun as MC
 from backend.common import runfigs as R
 from backend.common import stored
 from backend.common import whatchanged as W
@@ -76,6 +77,7 @@ class DataView:
         self.p = profile
         self.lineage = Lineage(profile.state_dir, profile.providers)
         self._rundocs: dict = {}
+        self._mc_docs: dict = {}                 # run -> (time, full run document of a simulated run)
         self._stored_lineage: dict = {}
         self._why: dict = {}                     # (loc, name, mtime, lineage version) -> why()
         self._rows: dict = {}                    # kind -> (key, time, rows)
@@ -246,11 +248,38 @@ class DataView:
                     for d in coll.find({"number": {"$in": part}}, RUNDOC_PROJ):
                         found[d["number"]] = _info(d)
                 for r in need:
+                    if r not in found and r >= MC_RUNS[0]:               # private MC: the run document is a file
+                        doc = self._mc_file(r)
+                        if doc:
+                            found[r] = _info(doc)
                     self._rundocs[r] = (now, found.get(r, {}))
             except Exception as e:                               # noqa: BLE001 (no database: folder view only)
                 for r in need:
-                    self._rundocs[r] = (now, {"error": str(e)[:200]})
+                    doc = self._mc_file(r) if r >= MC_RUNS[0] else None
+                    self._rundocs[r] = (now, _info(doc) if doc else {"error": str(e)[:200]})
         return {r: self._rundocs[r][1] for r in runs}
+
+    def _mc_file(self, run: int) -> dict | None:
+        """The run document file of a simulated run in this profile's folders (private MC has no database entry)."""
+        locs = sorted(self.p.locations, key=lambda x: not x.raw)          # raw records first: xams-sim writes it there
+        return MC.read_file([x.path for x in locs], run)
+
+    def mc_doc(self, run: int) -> dict:
+        """The full run document of a simulated run: run.runs_mc, else the file next to the raw records; {} if none.
+        {"error": ...} when the database cannot be read and there is no file either."""
+        now = time.time()
+        hit = self._mc_docs.get(run)
+        if hit and now - hit[0] < RUNDOC_TTL:
+            return hit[1]
+        doc, err = None, ""
+        try:
+            import amstrax  # type: ignore
+            doc = amstrax.get_mongo_collection("xams_mc").find_one({"number": run}, {"_id": 0, "daq_config": 0, "data": 0})
+        except Exception as e:                                   # noqa: BLE001
+            err = str(e)[:200]
+        doc = doc or self._mc_file(run) or ({"error": err} if err else {})
+        self._mc_docs[run] = (now, doc)
+        return doc
 
     # -------------------------------------------------------------------------------------------- status
     def why(self, d) -> dict | None:
@@ -497,10 +526,21 @@ class DataView:
                 n = f"{n_rows:,} {'LED windows' if 'led' in kinds else 'events'}".replace(",", " ")
             except Exception:                                    # noqa: BLE001
                 n = ""
-        sc = self.sc_snapshot(run)
-        det = None if sc is None else ({"message": "run database: " + sc["error"]} if "error" in sc else DET.panel(sc, run))
-        det_groups = DET.groups(sc, run) if sc and "error" not in sc else {}
-        return {"detector": det, "detector_groups": det_groups, "kinds": kinds, "facts": facts, "ds": ds, "n_events": n, "ref_auto": auto[0] if auto else None,
+        if run >= MC_RUNS[0]:                                      # simulated: what xams-sim wrote in the run document
+            doc = self.mc_doc(run)
+            if doc and "error" not in doc:
+                facts = MC.facts(doc) + [(k, v) for k, v in facts if k in ("processing", "job")]
+                det, det_groups, note = None, MC.groups(doc), MC.note(doc)
+            else:
+                det = {"message": ("run database: " + doc["error"]) if doc.get("error") else
+                       "no run document of this simulated run (database or file next to the raw records)"}
+                det_groups, note = {}, ""
+        else:
+            sc = self.sc_snapshot(run)
+            det = None if sc is None else ({"message": "run database: " + sc["error"]} if "error" in sc else DET.panel(sc, run))
+            det_groups = DET.groups(sc, run) if sc and "error" not in sc else {}
+            note = "start of the run (sc_snapshot)"
+        return {"detector": det, "detector_groups": det_groups, "groups_note": note, "kinds": kinds, "facts": facts, "ds": ds, "n_events": n, "ref_auto": auto[0] if auto else None,
                 "ref_choices": auto, "ref_param": ref_param,
                 "figure_rows": {k: [[(nm, next(t for x, t, _ in R.FIGURES[k] if x == nm)) for nm in row]
                                     for row in FIGURE_ROWS[k]] for k in kinds},
@@ -765,11 +805,18 @@ def blueprint(profile, base: str = "") -> Blueprint:
     def run_doc(run: int):
         """The run document (read-only; daq_config left out: large). Data[] entries marked when a folder of this
         profile holds that data set."""
+        d, err = None, ""
         try:
             import amstrax  # type: ignore
             d = amstrax.get_run_collection(run).find_one({"number": run}, {"_id": 0, "daq_config": 0})
         except Exception as e:                                   # noqa: BLE001
-            return jsonify({"error": f"run database: {str(e)[:200]}"}), 503
+            err = str(e)[:200]
+        if not d and run >= MC_RUNS[0]:
+            d = view._mc_file(run)                                   # private MC: the run document is a file
+            if d:
+                d.pop("daq_config", None)
+        if not d and err:
+            return jsonify({"error": f"run database: {err}"}), 503
         if not d:
             return jsonify({"error": "not in the run database (private MC runs have no run document there)"}), 404
         on_disk = {(x.dtype, x.hash) for x in view.scan_run(run)}
