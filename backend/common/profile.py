@@ -58,6 +58,8 @@ class Profile:
     can_act: Callable | None = None
     # the settings page (gear): None = the folders shown read-only; else a backend.private.setup.Setup
     setup: object | None = None
+    # () -> providers now, or None to keep the current ones (production: versions from the run database)
+    refresh_providers: Callable | None = None
 
 
 def private_location_problem(path, xams: Path = XAMS, uid: int | None = None) -> str | None:
@@ -130,9 +132,8 @@ def current_versions() -> list:
 
 
 def amstrax_paths() -> dict:
-    """Corrections version -> amstrax folder it was processed with, when not the dashboard's own amstrax
-    (XAMS_DASH_AMSTRAX_PATHS="PROD6=/data/xenon/xams_v2/software/amstrax_versioned/v11,..."). A newer amstrax can change
-    the lineage of every version, so each version is judged with the code that made it."""
+    """Override: corrections version -> amstrax folder (XAMS_DASH_AMSTRAX_PATHS="PROD6=/.../amstrax_versioned/v11,...").
+    Normally not needed: the run database says which amstrax made each version (versions_from_rundb)."""
     out = {}
     for item in os.environ.get("XAMS_DASH_AMSTRAX_PATHS", "").split(","):
         if "=" in item:
@@ -142,13 +143,54 @@ def amstrax_paths() -> dict:
     return out
 
 
-def production_providers(processed: Path) -> list:
+def version_days() -> float:
+    """A corrections version counts while production processed data with it in the last N days."""
+    return float(os.environ.get("XAMS_DASH_VERSION_DAYS", "90"))
+
+
+def versions_from_rundb(days: float | None = None, coll=None) -> list | None:
+    """[(corrections version, amstrax path or None)] of the production processing of the last `days` days, newest
+    first, from the data[] entries of the run documents (process.py writes corrections_version and amstrax_path).
+    The path is the one of the version's newest entry. None if the run database cannot be read."""
+    import datetime as _dt
+    days = version_days() if days is None else days
+    try:
+        if coll is None:
+            import amstrax  # type: ignore
+            coll = amstrax.get_run_collection(1)
+        since = _dt.datetime.utcnow() - _dt.timedelta(days=days)
+        rows = list(coll.aggregate([
+            {"$match": {"data.time": {"$gte": since}}},
+            {"$unwind": "$data"},
+            {"$match": {"data.time": {"$gte": since}, "data.corrections_version": {"$type": "string"}}},
+            {"$sort": {"data.time": -1}},
+            {"$group": {"_id": "$data.corrections_version", "path": {"$first": "$data.amstrax_path"},
+                        "last": {"$first": "$data.time"}}},
+            {"$sort": {"last": -1}}]))
+    except Exception:                                        # noqa: BLE001
+        return None
+    return [(r["_id"], r.get("path")) for r in rows if r.get("_id")]
+
+
+def production_providers(processed: Path, found: list | None = None) -> list:
+    """amstrax providers per corrections version, each with the amstrax that made it: the versions production used
+    in the last XAMS_DASH_VERSION_DAYS days (run database) plus XAMS_DASH_CURRENT_VERSIONS (always; the whole list
+    when the run database cannot be read). A new production shows up by itself."""
     data_runs = [0, MC_RUNS[0] - 1]
-    paths = amstrax_paths()
-    out = [{"name": v, "kind": "amstrax", "context": "xams",
-            "kwargs": {"output_folder": str(processed), "corrections_version": v, "event_structure_v2": True},
-            "runs": data_runs, **({"amstrax_path": paths[v]} if v in paths else {})}
-           for v in current_versions()]
+    if found is None:
+        found = versions_from_rundb() or []
+    paths = {v: p for v, p in found}
+    paths.update(amstrax_paths())
+    versions = [v for v, _ in found] + [v for v in current_versions() if v not in dict(found)]
+    out = []
+    for v in versions:
+        path = paths.get(v)
+        prov = {"name": v, "kind": "amstrax", "context": "xams",
+                "kwargs": {"output_folder": str(processed), "corrections_version": v, "event_structure_v2": True},
+                "runs": data_runs}
+        if path and (Path(path) / "amstrax").is_dir():
+            prov["amstrax_path"] = str(path).rstrip("/")
+        out.append(prov)
     out.append({"name": "LED", "kind": "amstrax", "context": "xams_led", "kwargs": {"output_folder": str(processed)},
                 "types": ["records_led", "led_calibration"], "runs": data_runs})
     out.append({"name": "MC (MC2)", "kind": "function", "path": str(Path(__file__).with_name("central_contexts.py")),
@@ -191,4 +233,11 @@ def production_profile() -> Profile:
                    providers=production_providers(processed), delete_statuses=frozenset({"outdated", "incomplete"}),
                    raw_rule=_live_on_stbc, on_delete=_remove_data_entry, require_current=True, bulk_limit=0.05,
                    links=[("Old dashboard", "/"), ("Corrections", "/corrections"), ("Admin", "/admin")],
-                   min_run=int(os.environ.get("XAMS_DASH_V3_MIN_RUN", "6000")))     # as the online processing
+                   min_run=int(os.environ.get("XAMS_DASH_V3_MIN_RUN", "6000")),     # as the online processing
+                   refresh_providers=lambda: _refresh(processed))
+
+
+def _refresh(processed: Path) -> list | None:
+    """The providers again (a new production, another amstrax); None when the run database cannot be read (keep)."""
+    found = versions_from_rundb()
+    return None if found is None else production_providers(processed, found)
