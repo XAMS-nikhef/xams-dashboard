@@ -27,3 +27,8 @@ users:
     sim_port: 21303
     strax_folder: /data/xenon/xams_v2/users/rvanbeek/data
     central_actions: false
+  mpierre:                   # Maxime Pierre
+    account: mpierre
+    dashboard_port: 21304
+    sim_port: 21305
+    central_actions: false
