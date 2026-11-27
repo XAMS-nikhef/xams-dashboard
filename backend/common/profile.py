@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import os
 import pwd
+import time
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Callable
@@ -126,9 +127,56 @@ def private_profile(settings) -> Profile:
 
 
 # ------------------------------------------------------------------------------------------------ production
-def current_versions() -> list:
-    """The corrections versions whose data count as current (XAMS_DASH_CURRENT_VERSIONS, default PROD0,v4)."""
-    return [v.strip() for v in os.environ.get("XAMS_DASH_CURRENT_VERSIONS", "PROD0,v4").split(",") if v.strip()]
+# Corrections workflow (amstrax_files docs/corrections_workflow.md, 2026-11-27): the run database says which versions
+# are current, daq.settings {name: "current_corrections_versions", value: ["PROD6", "ONLINE", ...]} and
+# {name: "online_corrections_version", value: "ONLINE"}. Changing them needs no restart (read at most once a minute).
+# Without the documents (or without the database) the environment variables below are used, as before.
+SETTING_CURRENT = "current_corrections_versions"
+SETTING_ONLINE = "online_corrections_version"
+SETTINGS_TTL = 60.0
+_settings_cache: dict = {}
+
+
+def db_setting(name, coll=None, now=None):
+    """Value of daq.settings {name: <name>} (cached SETTINGS_TTL s), or None if absent or the database is unreadable."""
+    now = time.monotonic() if now is None else now
+    hit = _settings_cache.get(name)
+    if coll is None and hit and now - hit[0] < SETTINGS_TTL:
+        return hit[1]
+    try:
+        if coll is None:
+            import amstrax  # type: ignore
+            coll = amstrax.get_mongo_client()["daq"]["settings"]
+        doc = coll.find_one({"name": name})
+        value = doc.get("value") if doc else None
+    except Exception:                                        # noqa: BLE001
+        return hit[1] if hit else None                        # keep the last known value
+    _settings_cache[name] = (now, value)
+    return value
+
+
+def _names(value) -> list:
+    if isinstance(value, str):
+        value = value.split(",")
+    if not isinstance(value, (list, tuple)):
+        return []
+    return [str(v).strip() for v in value if str(v).strip()]
+
+
+def current_versions(coll=None) -> list:
+    """The corrections versions whose data count as current: daq.settings current_corrections_versions, else
+    XAMS_DASH_CURRENT_VERSIONS (default PROD0,v4)."""
+    return (_names(db_setting(SETTING_CURRENT, coll))
+            or _names(os.environ.get("XAMS_DASH_CURRENT_VERSIONS", "PROD0,v4")))
+
+
+def submit_default_version(coll=None) -> str:
+    """Default corrections version for submissions: XAMS_AUTOPROC_CORRECTIONS if set to a version; if unset or 'db',
+    the online version of the run database (daq.settings online_corrections_version), else ONLINE."""
+    env = os.getenv("XAMS_AUTOPROC_CORRECTIONS", "db").strip()
+    if env and env != "db":
+        return env
+    return str(db_setting(SETTING_ONLINE, coll) or "ONLINE")
 
 
 def amstrax_paths() -> dict:
