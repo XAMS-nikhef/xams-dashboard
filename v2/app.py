@@ -89,7 +89,8 @@ def _v3_submit(run_ids, targets, corrections_version) -> dict:
 
 
 def _v3_submit_options() -> dict:
-    default = os.getenv('XAMS_AUTOPROC_CORRECTIONS', 'PROD0')
+    from backend.common.profile import submit_default_version
+    default = submit_default_version()
     versions = [v for v in processing.list_corrections_versions() if v != default]
     return {'targets': DEFAULT_TARGETS, 'corrections_versions': [default] + versions,      # the default always first
             'default_version': default, 'submit_mode': processing.submit_mode, 'max_jobs': processing.max_jobs}

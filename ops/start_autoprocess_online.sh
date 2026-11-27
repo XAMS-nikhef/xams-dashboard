@@ -8,9 +8,11 @@ MEM=${XAMS_AUTOPROC_MEM:-16000}
 MAX_JOBS=${XAMS_AUTOPROC_MAX_JOBS:-25}
 QUEUE=${XAMS_AUTOPROC_QUEUE:-short}
 MIN_RUN_NUMBER=${XAMS_AUTOPROC_MIN_RUN_NUMBER:-6000}
-# Corrections set (amstrax_files corrections/_global/_global_<NAME>.json). PROD0 = approved gains + position map
-# (posrec v2); set XAMS_AUTOPROC_CORRECTIONS= (empty) to run without corrections.
-CORRECTIONS=${XAMS_AUTOPROC_CORRECTIONS-PROD0}
+# Corrections set (amstrax_files corrections/_global/_global_<NAME>.json). Default "db": the loop reads the version in
+# every iteration from the run database (daq.settings online_corrections_version; ONLINE without that document), so a
+# change needs no restart (amstrax_files docs/corrections_workflow.md). A version name fixes it; set
+# XAMS_AUTOPROC_CORRECTIONS= (empty) to run without corrections.
+CORRECTIONS=${XAMS_AUTOPROC_CORRECTIONS-db}
 CORR_ARG=${CORRECTIONS:+--corrections_version $CORRECTIONS}
 ENV_ACTIVATE=${XAMS_DASH_ENV_ACTIVATE:-"source /data/xenon/xams_v2/setup.sh"}
 

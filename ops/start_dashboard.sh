@@ -22,5 +22,6 @@ screen -S "$SCREEN_NAME" -X quit || true
 screen -S "$SCREEN_NAME" -dm bash -lc "cd '$APP_DIR' && $ENV_ACTIVATE && export XAMS_DASH_HOST='$HOST' XAMS_DASH_PORT='$PORT' XAMS_DASH_MAX_JOBS='$MAX_JOBS' XAMS_CONFIG_FILE=~/.xams_config && python -m v2.app"
 
 echo "Started dashboard screen '$SCREEN_NAME' on ${HOST}:${PORT}"
-echo "  current versions: ${XAMS_DASH_CURRENT_VERSIONS:-PROD0,v4 (default)}; submit default: ${XAMS_AUTOPROC_CORRECTIONS:-PROD0 (default)}"
+echo "  current versions: run database daq.settings current_corrections_versions, else ${XAMS_DASH_CURRENT_VERSIONS:-PROD0,v4 (default)}"
+echo "  submit default: ${XAMS_AUTOPROC_CORRECTIONS:-db} (db = daq.settings online_corrections_version, else ONLINE)"
 echo "  amstrax per version: ${XAMS_DASH_AMSTRAX_PATHS:-(none: the environment amstrax for all)}"
